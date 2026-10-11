@@ -7,6 +7,7 @@ Beachtet Rate-Limits (429 + X-RateLimit-*), wiederholt bei 5xx und lässt sich
 from __future__ import annotations
 
 import json
+import re
 import ssl
 import threading
 import time
@@ -37,6 +38,19 @@ USER_ERROR_HINTS = {
 
 class Cancelled(Exception):
     pass
+
+
+_ID_SEGMENT = re.compile(r"/\d{5,}(?=/|$)")
+
+
+def route_key(path: str) -> str:
+    """Routen-Schablone für Rate-Limits: /guilds/123/channels -> /guilds/:id/channels.
+
+    Bewusst ohne Unterscheidung nach Server/Kanal: Discord begrenzt manche Routen
+    (vor allem bei Benutzerkonten) über alle IDs gemeinsam. Lieber kurz zu früh warten
+    als in eine Sperre laufen; 429-Antworten zählen bei Discord als ungültige Anfragen.
+    """
+    return _ID_SEGMENT.sub("/:id", path.split("?")[0])
 
 
 class DiscordAPIError(Exception):
@@ -72,6 +86,8 @@ class DiscordClient:
         self.timeout = timeout
         self.ssl_context = ssl_context
         self._bucket_wait: dict[str, float] = {}
+        self._global_wait = 0.0
+        self.rate_limit_hits = 0
         self._members: dict[tuple[str, str], dict | None] = {}
         self._members_off: set[str] = set()  # Server, bei denen der Endpunkt gesperrt ist
 
@@ -86,12 +102,12 @@ class DiscordClient:
         if params:
             query = "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = self.base_url + path + query
-        route = path.split("?")[0]
+        route = route_key(path)
         attempts = 0
         while True:
             if self.cancel.is_set():
                 raise Cancelled()
-            wait_until = self._bucket_wait.get(route, 0)
+            wait_until = max(self._bucket_wait.get(route, 0), self._global_wait)
             if wait_until > time.monotonic():
                 self._sleep(wait_until - time.monotonic())
             req = urllib.request.Request(url, headers={
@@ -114,9 +130,16 @@ class DiscordClient:
                     data = {}
                 if err.code == 429:
                     retry = float(data.get("retry_after") or err.headers.get("Retry-After") or 1)
-                    scope = "global" if data.get("global") else "Route"
-                    self.log(f"Rate-Limit ({scope}) – warte {retry:.1f} s …")
-                    self._sleep(retry + 0.1)
+                    until = time.monotonic() + retry + 0.1
+                    if data.get("global"):
+                        self._global_wait = until
+                    self._bucket_wait[route] = until
+                    self.rate_limit_hits += 1
+                    # Kurze Pausen nicht einzeln melden, das flutet nur das Log
+                    if retry >= 2 or self.rate_limit_hits == 1 or self.rate_limit_hits % 25 == 0:
+                        scope = "global" if data.get("global") else "Route"
+                        self.log(f"Rate-Limit ({scope}) – warte {retry:.1f} s … "
+                                 f"({self.rate_limit_hits}× bisher, normal bei großen Exporten)")
                     continue
                 if err.code >= 500 and attempts < 4:
                     attempts += 1

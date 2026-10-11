@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
 from dcexport import model  # noqa: E402
-from dcexport.api import DiscordAPIError, DiscordClient, normalize_token  # noqa: E402
+from dcexport.api import DiscordAPIError, DiscordClient, normalize_token, route_key  # noqa: E402
 from dcexport.exporter import ApiExporter, PackageExporter  # noqa: E402
 from dcexport.markdown import Resolver, is_emoji_only, render_html, render_plain  # noqa: E402
 from dcexport.model import ExportOptions  # noqa: E402
@@ -63,6 +63,11 @@ class UtilTests(unittest.TestCase):
         long = sanitize_filename("x" * 300 + ".png", max_len=50)
         self.assertEqual(len(long), 50)
         self.assertTrue(long.endswith(".png"))
+
+    def test_route_key(self):
+        self.assertEqual(route_key("/guilds/123456789012/channels"), "/guilds/:id/channels")
+        self.assertEqual(route_key("/channels/123456789012/messages?limit=100"), "/channels/:id/messages")
+        self.assertEqual(route_key("/users/@me/guilds"), "/users/@me/guilds")
 
     def test_token_normalize(self):
         self.assertEqual(normalize_token(' "Bot abc.def" '), "abc.def")
@@ -369,6 +374,24 @@ class ApiTests(unittest.TestCase):
         self.assertLessEqual(self.mock.user_forbidden, 2)
         self.assertFalse(any("Message Content Intent" in line for line in self.logs))
 
+    def test_shared_rate_limit_across_ids(self):
+        for gid in ("111111", "222222", "333333", "444444"):
+            self.client.request(f"/guilds/{gid}/shared")
+        self.assertEqual(self.mock.shared_429, 0)
+        self.assertEqual(self.client.rate_limit_hits, 0)
+
+    def test_user_lazy_guild_channels(self):
+        client = DiscordClient(USER_TOKEN, user_token=True, base_url=self.mock.api)
+        exporter = ApiExporter(client)
+        guilds = exporter.connect(load_channels=False)
+        server = next(gd for gd in guilds if gd.guild["id"] == "1000")
+        self.assertFalse(server.loaded)
+        self.assertEqual(server.channels, [])
+        self.assertFalse(any("/guilds/1000/channels" in r for r in self.mock.requests))
+        loaded = exporter.load_guild("1000")
+        self.assertTrue(loaded.loaded)
+        self.assertIn("willkommen", [c.name for c in loaded.channels])
+
     def test_bot_token_has_no_dms(self):
         exporter = ApiExporter(self.client)
         self.assertNotIn("@me", [gd.guild["id"] for gd in exporter.connect()])
@@ -416,6 +439,7 @@ class GuiSmokeTest(unittest.TestCase):
                 client = DiscordClient(TOKEN, base_url=mock.api, log=app.log, cancel=app.cancel)
                 exporter = ApiExporter(client, log=app.log)
                 app._on_api_loaded((exporter, exporter.connect()))
+                self.assertEqual(app._pending_guilds, {})  # Bot: alles sofort geladen
                 tree = app.api_tree
                 labels = list(tree.labels.values())
                 self.assertIn("# willkommen", labels)
@@ -441,6 +465,40 @@ class GuiSmokeTest(unittest.TestCase):
                 model.CDN, model.MEDIA_CDN = cdn
                 for name, fn in patched.items():
                     setattr(messagebox, name, fn)
+
+
+@unittest.skipUnless(_tk_available(), "keine Anzeige / kein Tkinter")
+class GuiUserModeTest(unittest.TestCase):
+    def test_lazy_guild_on_expand(self):
+        from dcexport import gui
+
+        with MockDiscord() as mock, tempfile.TemporaryDirectory() as tmp:
+            os.environ["APPDATA"] = tmp
+            app = gui.App()
+            try:
+                client = DiscordClient(USER_TOKEN, user_token=True, base_url=mock.api, log=app.log,
+                                       cancel=app.cancel)
+                exporter = ApiExporter(client, log=app.log)
+                app._on_api_loaded((exporter, exporter.connect(load_channels=False)))
+                labels = list(app.api_tree.labels.values())
+                self.assertIn("@ DM mit misty (@misty)", labels)
+                self.assertNotIn("# willkommen", labels)
+                node = next(iter(app._pending_guilds))
+                app.api_tree.toggle(node)  # Server angehakt, bevor die Kanäle da sind
+                app.api_tree.tree.focus(node)
+                app._on_tree_open()
+                deadline = time.time() + 30
+                while (app.worker and app.worker.is_alive()) or not app.events.empty():
+                    app.update()
+                    time.sleep(0.02)
+                    self.assertLess(time.time(), deadline)
+                app.update()
+                self.assertEqual(app._pending_guilds, {})
+                self.assertIn("# willkommen", list(app.api_tree.labels.values()))
+                checked = {c.name for c in app.api_tree.checked()}
+                self.assertIn("willkommen", checked)  # Haken am Server gilt für nachgeladene Kanäle
+            finally:
+                app.destroy()
 
 
 if __name__ == "__main__":

@@ -59,7 +59,9 @@ def cmd_list(args) -> int:
 def cmd_export(args) -> int:
     options = _options(args)
     exporter = ApiExporter(_client(args), log=_print)
-    guilds = exporter.connect()
+    # Nur DMs gewünscht: Kanallisten der Server gar nicht erst holen
+    dms_only = args.user and args.all_dms and not args.guild and not args.channel
+    guilds = exporter.connect(load_channels=not dms_only)
     wanted_channels = set(args.channel or [])
     wanted_guilds = set(args.guild or [])
     if args.all_dms:

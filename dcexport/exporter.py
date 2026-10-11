@@ -67,6 +67,7 @@ class GuildData:
     all_channels: dict[str, str]  # id -> Name, auch Kategorien, für #Erwähnungen
     roles: dict[str, tuple[str, int | None]] | None = None
     active_threads: list[dict] | None = None
+    loaded: bool = True  # False: Kanäle noch nicht geholt (Benutzerkonto, Laden beim Aufklappen)
 
 
 def base_name(ch: ChannelInfo) -> str:
@@ -159,19 +160,36 @@ class ApiExporter:
 
     # ------------------------------------------------------------ Auflisten
 
-    def connect(self) -> list[GuildData]:
+    def connect(self, load_channels: bool = True) -> list[GuildData]:
+        """Server (und mit Benutzer-Token die DMs) holen.
+
+        load_channels=False holt nur die Serverliste; die Kanäle kommen später mit load_guild().
+        Spart bei Konten mit vielen Servern viele Anfragen, wenn nur DMs gebraucht werden.
+        """
         self.bot_user = self.client.me()
         self.guilds.clear()
         if self.client.is_user:
             self.guilds[DM_GUILD_ID] = self._dm_data(self.client.private_channels())
         for g in self.client.guilds():
-            try:
-                raw_channels = self.client.guild_channels(g["id"])
-            except DiscordAPIError as err:
-                self.log(f"Server {g.get('name')}: Kanäle nicht lesbar ({err})")
-                raw_channels = []
-            self.guilds[g["id"]] = self._guild_data(g, raw_channels)
+            if load_channels:
+                self.guilds[g["id"]] = self._load_guild(g)
+            else:
+                self.guilds[g["id"]] = GuildData(guild=g, channels=[], all_channels={}, loaded=False)
         return list(self.guilds.values())
+
+    def load_guild(self, guild_id: str) -> GuildData:
+        gd = self.guilds[guild_id]
+        if not gd.loaded:
+            gd = self.guilds[guild_id] = self._load_guild(gd.guild)
+        return gd
+
+    def _load_guild(self, g: dict) -> GuildData:
+        try:
+            raw_channels = self.client.guild_channels(g["id"])
+        except DiscordAPIError as err:
+            self.log(f"Server {g.get('name')}: Kanäle nicht lesbar ({err})")
+            raw_channels = []
+        return self._guild_data(g, raw_channels)
 
     @staticmethod
     def _dm_data(raw_channels: list[dict]) -> GuildData:

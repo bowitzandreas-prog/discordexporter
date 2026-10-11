@@ -142,6 +142,24 @@ class CheckTree(ttk.Frame):
         self.tree.bind("<Button-1>", self._on_click, add=True)
         self.tree.bind("<space>", self._on_space)
 
+    def remove_children(self, iid: str) -> None:
+        """Kinder eines Knotens entfernen (z. B. Platzhalter vor dem Nachladen)."""
+        gone = set()
+
+        def collect(node: str) -> None:
+            for child in self.tree.get_children(node):
+                gone.add(child)
+                collect(child)
+
+        collect(iid)
+        for child in self.tree.get_children(iid):
+            self.tree.delete(child)
+        for child in gone:
+            self.state.pop(child, None)
+            self.labels.pop(child, None)
+            self.payload.pop(child, None)
+        self.order = [(i, p) for i, p in self.order if i not in gone]
+
     def clear(self) -> None:
         self.tree.delete(*self.tree.get_children(""))
         self.state.clear()
@@ -237,7 +255,7 @@ class App(tk.Tk):
         self._style()
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.after(100, self._poll)
+        self._poll_id = self.after(100, self._poll)
 
     # ------------------------------------------------------------- Aufbau
 
@@ -312,6 +330,8 @@ class App(tk.Tk):
             row=2, column=0, columnspan=4, sticky="w", pady=(6, 6))
 
         self.api_tree = CheckTree(tab, [("type", "Typ", 130), ("id", "ID", 170)], "Server / Kanal")
+        self._pending_guilds: dict[str, str] = {}
+        self.api_tree.tree.bind("<<TreeviewOpen>>", self._on_tree_open, add=True)
         self.api_tree.grid(row=3, column=0, columnspan=4, sticky="nsew")
 
         bar = ttk.Frame(tab)
@@ -444,7 +464,7 @@ class App(tk.Tk):
                 getattr(self, f"_on_{kind}")(payload)
         except queue.Empty:
             pass
-        self.after(100, self._poll)
+        self._poll_id = self.after(100, self._poll)
 
     def _help_bot(self) -> None:
         if messagebox.askyesno("Bot einrichten", HELP_BOT + "\n\nDeveloper Portal jetzt im Browser öffnen?"):
@@ -519,7 +539,7 @@ class App(tk.Tk):
         try:
             client = DiscordClient(token, user_token=user, log=self.log, cancel=self.cancel)
             exporter = ApiExporter(client, log=self.log)
-            guilds = exporter.connect()
+            guilds = exporter.connect(load_channels=not user)
             self.events.put(("api_loaded", (exporter, guilds)))
         except Exception as err:  # noqa: BLE001
             self.events.put(("failed", f"Verbindung fehlgeschlagen: {err}"))
@@ -530,34 +550,80 @@ class App(tk.Tk):
         self._busy(False)
         tree = self.api_tree
         tree.clear()
+        self._pending_guilds = {}
         channel_count = 0
         for gd in guilds:
             is_dm = gd.guild["id"] == DM_GUILD_ID
             g = tree.insert("", gd.guild.get("name", "?"), values=("Direktnachrichten" if is_dm else "Server",
                                                                   "" if is_dm else gd.guild["id"]),
                             open_=len(guilds) == 1 or is_dm)
-            cats: dict[str, str] = {}
-            for ch in gd.channels:
-                parent = g
-                if ch.category:
-                    if ch.category not in cats:
-                        cats[ch.category] = tree.insert(g, ch.category.upper(), values=("Kategorie", ""), open_=True)
-                    parent = cats[ch.category]
-                prefix = "🔊 " if ch.type in (2, 13) else ("🗂 " if ch.type in (15, 16) else
-                                                          ("@ " if ch.is_dm else "# "))
-                tree.insert(parent, prefix + ch.name, payload=ch,
-                            values=(CHANNEL_TYPES.get(ch.type, str(ch.type)), ch.id))
-                channel_count += 1
+            if gd.loaded:
+                channel_count += self._fill_guild(g, gd)
+            else:
+                tree.insert(g, "Kanäle werden beim Aufklappen geladen …", values=("", ""))
+                self._pending_guilds[g] = gd.guild["id"]
         bot = (exporter.bot_user or {}).get("username", "?")
         servers = sum(1 for gd in guilds if gd.guild["id"] != DM_GUILD_ID)
         dms = sum(len(gd.channels) for gd in guilds if gd.guild["id"] == DM_GUILD_ID)
-        dm_text = f", {dms} Direktnachrichten" if exporter.client.is_user else ""
-        self.api_status.set(f"Verbunden als {bot} – {servers} Server{dm_text}, {channel_count} Kanäle. "
-                            f"Kanäle anhaken und unten exportieren.")
+        if exporter.client.is_user:
+            self.api_status.set(f"Verbunden als {bot} – {dms} Direktnachrichten, {servers} Server "
+                                f"(Kanäle laden beim Aufklappen). Anhaken und unten exportieren.")
+        else:
+            self.api_status.set(f"Verbunden als {bot} – {servers} Server, {channel_count} Kanäle. "
+                                f"Kanäle anhaken und unten exportieren.")
         if not guilds:
             self.api_status.set(f"Verbunden als {bot}, aber der Bot ist auf keinem Server. Erst einladen "
                                 f"(siehe Anleitung).")
         self.log(f"Verbunden als {bot}: {len(guilds)} Server, {channel_count} Kanäle.")
+
+    def _fill_guild(self, node: str, gd) -> int:
+        """Kanäle eines Servers (oder die DMs) unter den Knoten hängen."""
+        tree = self.api_tree
+        cats: dict[str, str] = {}
+        for ch in gd.channels:
+            parent = node
+            if ch.category:
+                if ch.category not in cats:
+                    cats[ch.category] = tree.insert(node, ch.category.upper(), values=("Kategorie", ""), open_=True)
+                parent = cats[ch.category]
+            prefix = "🔊 " if ch.type in (2, 13) else ("🗂 " if ch.type in (15, 16) else
+                                                      ("@ " if ch.is_dm else "# "))
+            tree.insert(parent, prefix + ch.name, payload=ch,
+                        values=(CHANNEL_TYPES.get(ch.type, str(ch.type)), ch.id))
+        if tree.state.get(node) == 1:
+            tree._set_subtree(node, 1)
+        return len(gd.channels)
+
+    def _on_tree_open(self, _event=None) -> None:
+        node = self.api_tree.tree.focus()
+        if node not in self._pending_guilds or not self.api_exporter:
+            return
+        if self.worker and self.worker.is_alive():
+            self.status.set("Bitte warten, bis der laufende Vorgang fertig ist, dann erneut aufklappen.")
+            return
+        self.status.set("Lade Kanäle …")
+        self._run(self._guild_worker, node, self._pending_guilds[node])
+
+    def _guild_worker(self, node: str, guild_id: str) -> None:
+        try:
+            gd = self.api_exporter.load_guild(guild_id)
+            self.events.put(("guild_loaded", (node, gd)))
+        except Exception as err:  # noqa: BLE001
+            self.events.put(("guild_failed", f"Kanäle nicht ladbar: {err}"))
+
+    def _on_guild_loaded(self, payload) -> None:
+        node, gd = payload
+        self._busy(False)
+        self._pending_guilds.pop(node, None)
+        self.api_tree.remove_children(node)
+        count = self._fill_guild(node, gd)
+        self.api_tree.tree.item(node, open=True)
+        self.status.set(f"{gd.guild.get('name', 'Server')}: {count} Kanäle geladen.")
+
+    def _on_guild_failed(self, msg: str) -> None:
+        self._busy(False)
+        self.status.set(msg)
+        self.log(msg)
 
     # ---------------------------------------------------------- Datenpaket
 
@@ -700,6 +766,14 @@ class App(tk.Tk):
     def _cancel(self) -> None:
         self.cancel.set()
         self.status.set("Breche ab …")
+
+    def destroy(self) -> None:
+        # Ausstehenden Poll abbrechen, sonst meldet Tk "invalid command name …_poll"
+        try:
+            self.after_cancel(self._poll_id)
+        except (AttributeError, tk.TclError):
+            pass
+        super().destroy()
 
     def _on_close(self) -> None:
         if self.worker and self.worker.is_alive():

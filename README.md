@@ -81,7 +81,7 @@ Der Token wird nicht gespeichert. Steht er in der Umgebungsvariablen
 Reiter „Discord-API“: oben Bot-Token oder eigenes Konto wählen, Token eintragen,
 „Verbinden“, Kanäle anhaken. Ein Haken an Server oder Kategorie wählt alles
 darunter; mit eigenem Konto stehen die Direktnachrichten ganz oben, neueste
-zuerst. Reiter „Datenpaket“: `package.zip` wählen, Unterhaltungen anhaken, mit
+zuerst, und die Kanäle eines Servers werden erst beim Aufklappen geladen. Reiter „Datenpaket“: `package.zip` wählen, Unterhaltungen anhaken, mit
 dem Filter lassen sich lange DM-Listen eingrenzen.
 
 Unten Formate, Zeitraum (`TT.MM.JJJJ`, das Enddatum zählt mit) und Zielordner

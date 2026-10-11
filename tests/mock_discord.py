@@ -6,6 +6,7 @@ import json
 import re
 import struct
 import threading
+import time
 import zlib
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,6 +52,8 @@ class MockDiscord:
         self.requests: list[str] = []
         self.rate_limited_once = False
         self.user_forbidden = 0
+        self.shared_429 = 0
+        self._shared_until = 0.0
         self.auth_headers: set[str] = set()
         self.messages = self._build_messages()
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -145,6 +148,14 @@ class MockDiscord:
                 {"id": "6001", "type": 1, "recipients": [USERS["4002"]],
                  "last_message_id": self.messages["6001"][-1]["id"]},
             ], {}
+        m = re.fullmatch(r"/api/v10/guilds/(\d+)/shared", path)
+        if m:  # Route mit gemeinsamem Limit über alle Server (wie bei Benutzerkonten beobachtet)
+            now = time.monotonic()
+            if now < self._shared_until:
+                self.shared_429 += 1
+                return 429, {"message": "You are being rate limited.", "retry_after": 0.1, "global": False}, {}
+            self._shared_until = now + 0.1
+            return 200, {"ok": True}, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "0.1"}
         if user and (path.endswith("/threads/active") or "/members/" in path):
             self.user_forbidden += 1
             return 403, {"message": "Missing Access", "code": 50001}, {}
