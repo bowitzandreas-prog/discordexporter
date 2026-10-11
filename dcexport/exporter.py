@@ -16,6 +16,7 @@ from .media import MediaStore, short_hash
 from .model import (THREAD_ONLY_TYPES, ChannelInfo, ExportOptions, MESSAGE_CHANNEL_TYPES, display_name,
                     emoji_url, guild_icon_url, normalize_api_message)
 from .package import DataPackage, PackageConversation
+from .protocol import channel_entry, message_link, sha256_file, write_protocol
 from .util import datetime_to_snowflake, parse_timestamp, sanitize_filename, snowflake_to_datetime
 from .writers import FORMATS, RenderContext, write_csv, write_json, write_markdown, write_raw_json, write_txt
 
@@ -39,9 +40,18 @@ class Summary:
     media_failed: int = 0
     errors: list[str] = field(default_factory=list)
     cancelled: bool = False
+    channel_log: list[dict] = field(default_factory=list)
+    skipped_items: list[str] = field(default_factory=list)
+    protocol_files: list[str] = field(default_factory=list)
+
+    def result_text(self) -> str:
+        def n(count: int, one: str, many: str) -> str:
+            return f"{count} {one if count == 1 else many}"
+        return ", ".join([n(self.channels, "Kanal", "Kanäle"), n(self.messages, "Nachricht", "Nachrichten"),
+                          n(len(self.files), "Datei", "Dateien")])
 
     def text(self) -> str:
-        parts = [f"{self.channels} Kanäle", f"{self.messages} Nachrichten", f"{len(self.files)} Dateien"]
+        parts = [self.result_text()]
         if self.media_ok or self.media_failed:
             parts.append(f"{self.media_ok} Medien" + (f" ({self.media_failed} fehlgeschlagen)" if self.media_failed else ""))
         if self.skipped:
@@ -249,18 +259,20 @@ class ApiExporter:
                 progress(index, len(targets), 0.0, label)
                 self.log(f"[{index + 1}/{len(targets)}] {label}")
                 try:
-                    count, files = self._export_channel(ch, options, exported_at, out_root, medias,
-                                                        lambda f: progress(index, len(targets), f, label),
-                                                        skip_empty=from_expansion)
+                    messages, files = self._export_channel(ch, options, exported_at, out_root, medias,
+                                                           lambda f: progress(index, len(targets), f, label),
+                                                           skip_empty=from_expansion)
                 except DiscordAPIError as err:
                     summary.skipped += 1
+                    summary.skipped_items.append(f"{label} (Kanal-ID {ch.id}): {err}")
                     self.log(f"  Übersprungen: {err}")
                     continue
                 if files:
                     summary.channels += 1
-                    summary.messages += count
+                    summary.messages += len(messages)
                     summary.files += files
-                    self.log(f"  {count} Nachrichten → {len(files)} Datei(en)")
+                    summary.channel_log.append(channel_entry(label, ch.id, messages, files))
+                    self.log(f"  {len(messages)} Nachrichten → {len(files)} Datei(en)")
                 else:
                     self.log("  Keine Nachrichten im Zeitraum – keine Datei geschrieben.")
             progress(len(targets), len(targets), 1.0, "")
@@ -273,11 +285,15 @@ class ApiExporter:
         for media in medias.values():
             summary.media_ok += media.downloaded
             summary.media_failed += media.failed
+        bot = self.bot_user or {}
+        _finish_protocol(self.log, out_root, exported_at, summary, options,
+                         [f"Discord-API (Bot-Token), Bot „{bot.get('username', '?')}“ (ID {bot.get('id', '?')})"],
+                         [p for m in medias.values() for p in m.files()])
         return summary
 
     def _export_channel(self, ch: ChannelInfo, options: ExportOptions, exported_at: datetime, out_root: Path,
                         medias: dict[str, MediaStore], on_fraction: Callable[[float], None],
-                        skip_empty: bool) -> tuple[int, list[str]]:
+                        skip_empty: bool) -> tuple[list[dict], list[str]]:
         start = options.after or snowflake_to_datetime(ch.id)
         end = options.before or datetime.now(timezone.utc)
         if ch.last_message_id:
@@ -287,13 +303,15 @@ class ApiExporter:
         raw_messages, messages = [], []
         for raw in self.client.iter_messages(ch.id, options.after, options.before):
             raw_messages.append(raw)
-            messages.append(normalize_api_message(raw))
+            msg = normalize_api_message(raw)
+            msg["link"] = message_link(ch.guild_id, ch.id, msg["id"])
+            messages.append(msg)
             if len(messages) % 100 == 0:
                 done = (snowflake_to_datetime(raw["id"]) - start).total_seconds() / span
                 on_fraction(min(max(done, 0.0), 0.99))
                 self.log(f"  … {len(messages)} Nachrichten")
         if not messages and skip_empty:
-            return 0, []
+            return [], []
         normal = [m for m in messages if m["type"] in (0, 19)]
         if len(normal) >= 5 and not any(m["content"] or m["attachments"] or m["embeds"] for m in normal):
             self.log("  ⚠ Alle Nachrichtentexte sind leer. Im Developer Portal unter „Bot“ den "
@@ -330,7 +348,7 @@ class ApiExporter:
                             guild_icon_local=guild_icon_local)
         files = write_outputs(ctx, folder, base_name(ch))
         on_fraction(1.0)
-        return len(messages), files
+        return messages, files
 
     def _apply_members(self, gd: GuildData, messages: list[dict], raw_messages: list[dict]) -> None:
         """Server-Spitznamen und Rollenfarbe nachladen (ein Abruf je Autor, gecacht)."""
@@ -395,6 +413,8 @@ class PackageExporter:
                            if (not options.after or parse_timestamp(m["timestamp"]) >= options.after)
                            and (not options.before or parse_timestamp(m["timestamp"]) < options.before)]
                 messages = [m for _row, m in entries]
+                for m in messages:
+                    m["link"] = message_link(conv.info.guild_id, conv.info.id, m["id"])
                 if media:
                     self.log("  Lade Medien …")
                     _localize(messages, media)
@@ -408,6 +428,7 @@ class PackageExporter:
                 summary.channels += 1
                 summary.messages += len(messages)
                 summary.files += files
+                summary.channel_log.append(channel_entry(label, conv.info.id, messages, files))
                 self.log(f"  {len(messages)} Nachrichten → {len(files)} Datei(en)")
             progress(len(selected), len(selected), 1.0, "")
         except Cancelled:
@@ -418,4 +439,29 @@ class PackageExporter:
             self.log(f"Fehler: {err}\n{traceback.format_exc()}")
         if media:
             summary.media_ok, summary.media_failed = media.downloaded, media.failed
+        pkg_path = self.package.path
+        source = [f"Discord-Datenpaket, Konto „{self.package.author['username']}“ (ID {self.package.author['id']})",
+                  f"Paket: {pkg_path}"]
+        if pkg_path.is_file():
+            source.append(f"SHA-256 des Pakets: {sha256_file(pkg_path)}")
+        else:
+            source.append("Paket als entpackter Ordner gelesen (keine Prüfsumme des Originals)")
+        _finish_protocol(self.log, Path(options.out_dir), exported_at, summary, options, source,
+                         media.files() if media else [],
+                         ["Das Datenpaket enthält nur die eigenen Nachrichten des Kontos, nicht die der Gegenseite."])
         return summary
+
+
+def _finish_protocol(log: LogFn, out_dir: Path, started: datetime, summary: Summary, options: ExportOptions,
+                     source_lines: list[str], media_files: list[Path], extra_notes: list[str] | None = None) -> None:
+    """Exportprotokoll und Prüfsummen schreiben, sobald mindestens eine Datei entstanden ist."""
+    if not summary.files:
+        return
+    try:
+        summary.protocol_files = write_protocol(out_dir, started=started, summary=summary, options=options,
+                                                source_lines=source_lines, media_files=media_files,
+                                                extra_notes=extra_notes)
+        log(f"Exportprotokoll und Prüfsummen: {Path(summary.protocol_files[0]).name}")
+    except OSError as err:
+        summary.errors.append(f"Exportprotokoll nicht geschrieben: {err}")
+        log(f"Fehler beim Exportprotokoll: {err}")

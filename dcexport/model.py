@@ -257,7 +257,8 @@ def normalize_package_message(row: dict, author: dict) -> dict | None:
         })
     return {
         "id": mid, "type": 0, "timestamp": iso(ts), "edited_timestamp": None, "pinned": False,
-        "author": dict(author), "content": str(lowered.get("contents") or ""),
+        "author": dict(author),
+        "content": str(lowered.get("contents") or "").replace("\r\n", "\n"),
         "attachments": attachments, "embeds": [], "stickers": [], "reactions": [], "mentions": [],
         "mention_roles": [], "mention_everyone": False, "reference": None, "referenced_message": None,
         "forwarded": [], "interaction": None, "poll": None, "thread": None, "call": None,

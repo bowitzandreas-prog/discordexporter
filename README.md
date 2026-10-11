@@ -15,6 +15,9 @@ Ausgabeformate, frei kombinierbar:
 | Text | `.txt` | Schlichtes Protokoll |
 | Markdown | `.md` | Notizen, Wiki, Git |
 
+Dazu bei jedem Lauf ein Exportprotokoll und SHA-256-Prüfsummen, siehe
+[Beweissicherung](#beweissicherung).
+
 ## Zwei Quellen
 
 **Server-Kanäle per Bot-Token.** Ein eigener Bot wird auf den Server
@@ -103,6 +106,38 @@ weitergibt, gibt den Ordner `_Medien` mit.
 
 Ein zweiter Export in denselben Ordner überschreibt die Dateien und lädt nur
 fehlende Medien nach.
+
+## Beweissicherung
+
+Jeder Export schreibt zusätzlich zwei Dateien in den Zielordner:
+
+- `Exportprotokoll_<Datum_Zeit>.txt`: wann, von wem (Windows-Benutzer, Rechner), aus welcher Quelle
+  (Bot mit ID bzw. Datenpaket mit SHA-256), welcher Zeitraum, je Kanal Anzahl sowie erste und letzte
+  Nachricht mit ID, übersprungene Kanäle mit Grund.
+- `Pruefsummen_<Datum_Zeit>.sha256`: SHA-256 jeder erzeugten Datei samt Medien. Damit lässt sich
+  später zeigen, dass seit dem Export nichts verändert wurde. Der Prüfbefehl für PowerShell steht im
+  Protokoll; ohne Ausgabe ist alles unverändert, sonst erscheint `ABWEICHUNG: <Datei>`.
+
+Jede Nachricht trägt ihre Discord-ID und einen Link `https://discord.com/channels/…` (HTML: Klick auf
+die Uhrzeit, CSV: Spalte „Link“, JSON: Feld `link`). Darüber lässt sie sich im Discord-Client
+nachprüfen, solange sie existiert. Im Text-Export stehen zusätzlich Nutzername und Nutzer-ID.
+
+Was das Werkzeug nicht kann: Bearbeitete Nachrichten gibt Discord nur im letzten Stand heraus,
+gelöschte gar nicht. Bei Direktnachrichten enthält das Datenpaket nur die eigene Seite.
+
+Vorgehen, das sich bewährt hat (keine Rechtsberatung):
+
+1. Früh sichern. Löscht die Gegenseite Nachrichten, sind sie auch im Export weg.
+2. Server-Kanal: per Bot exportieren, das enthält beide Seiten.
+3. Direktnachrichten: Datenpaket für die eigene Seite. Die Gegenseite zusätzlich im Discord-Client
+   mit Bildschirmfotos oder einer Bildschirmaufnahme sichern, mit sichtbarem Datum. Dazu die Nutzer-ID
+   der Gegenseite notieren (Einstellungen → Erweitert → Entwicklermodus, dann Rechtsklick auf den
+   Namen → „Nutzer-ID kopieren“). Der Anzeigename lässt sich ändern, die ID nicht.
+4. Exportordner nicht mehr bearbeiten, eine Kopie auf einen zweiten Datenträger legen.
+   Protokoll und Prüfsummendatei per Mail an sich selbst oder an den Anwalt schicken; das belegt,
+   dass der Stand zu diesem Zeitpunkt existierte.
+5. Je nach Fall den Nutzer bei Discord melden (Rechtsklick → „Melden“) oder Anzeige erstatten.
+   Strafverfolgungsbehörden können Daten direkt bei Discord anfordern, auch die der Gegenseite.
 
 ## Kommandozeile
 

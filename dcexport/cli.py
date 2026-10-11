@@ -67,6 +67,8 @@ def cmd_export(args) -> int:
         return 2
     summary = exporter.export(selected, options, progress=_progress)
     _print(summary.text())
+    for path in summary.protocol_files:
+        _print(f"Protokoll: {path}")
     return 1 if summary.errors else 0
 
 
@@ -84,6 +86,8 @@ def cmd_package(args) -> int:
         return 2
     summary = PackageExporter(pkg, log=_print).export(selected, options, progress=_progress)
     _print(summary.text())
+    for path in summary.protocol_files:
+        _print(f"Protokoll: {path}")
     return 1 if summary.errors else 0
 
 

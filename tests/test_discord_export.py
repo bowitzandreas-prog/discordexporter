@@ -25,6 +25,7 @@ from dcexport.model import ExportOptions  # noqa: E402
 from dcexport.package import DataPackage  # noqa: E402
 from dcexport.util import (date_range_to_utc, datetime_to_snowflake, parse_date_input,  # noqa: E402
                            parse_timestamp, sanitize_filename, snowflake_to_datetime)
+from dcexport.protocol import sha256_file  # noqa: E402
 from dcexport.writers import FORMATS  # noqa: E402
 from mock_discord import START, TOKEN, MockDiscord, sf  # noqa: E402
 
@@ -155,8 +156,8 @@ def build_old_package_dir(root: Path) -> None:
     (ch / "channel.json").write_text(json.dumps({"id": "555", "type": 3, "name": "Sammler-Runde"}), "utf-8")
     (ch / "messages.csv").write_text(
         'ID,Timestamp,Contents,Attachments\n'
-        f'{sf(2)},2024-03-01 09:02:00.123000+00:00,"Hallo, Welt\nZeile 2",\n'
-        f'{sf(1)},2024-03-01 09:01:00.000000+00:00,Erste,\n', "utf-8")
+        f'{sf(2)},2024-03-01 09:02:00.123000+00:00,"Hallo, Welt\r\nZeile 2",\r\n'
+        f'{sf(1)},2024-03-01 09:01:00.000000+00:00,Erste,\r\n', "utf-8", newline="")
 
 
 class PackageTests(unittest.TestCase):
@@ -196,6 +197,10 @@ class PackageTests(unittest.TestCase):
             self.assertTrue((out / local).is_file())
             raw = json.loads((out / "DM mit misty#0 [111].raw.json").read_text("utf-8"))
             self.assertEqual(raw["messages"][0]["Contents"], "Hallo **Misty**")
+            self.assertTrue(data["messages"][0]["link"].startswith("https://discord.com/channels/@me/111/"))
+            proto = Path(summary.protocol_files[0]).read_text("utf-8")
+            self.assertIn(f"SHA-256 des Pakets: {sha256_file(zpath)}", proto)
+            self.assertIn("nur die eigenen Nachrichten", proto)
             pkg.close()
 
     def test_date_filter(self):
@@ -314,6 +319,29 @@ class ApiTests(unittest.TestCase):
             self.assertIn("sticker_8001.png", media)
             self.assertTrue(any(n.startswith("icon_1000_") for n in media))
             self.assertTrue(any(n.startswith("avatar_4001_") for n in media))
+
+            # Beweissicherung: Links, IDs, Protokoll, Prüfsummen
+            self.assertEqual(rows[0][-1], "Link")
+            self.assertEqual(rows[1][-1], f"https://discord.com/channels/1000/2001/{rows[1][0]}")
+            self.assertEqual(welcome["link"], f"https://discord.com/channels/1000/2001/{welcome['id']}")
+            self.assertIn(f'href="https://discord.com/channels/1000/2001/{welcome["id"]}"', html)
+            txt = base.with_suffix(".txt").read_text("utf-8")
+            self.assertIn(f"[ID {welcome['id']}]", txt)
+            self.assertIn("Nutzer-ID 4001", txt)
+            self.assertEqual(len(summary.protocol_files), 2)
+            proto_path, sums_path = (Path(p) for p in summary.protocol_files)
+            proto = proto_path.read_text("utf-8")
+            for needle in ("Bot „ExportBot“ (ID 9999)", "Status:        vollständig", "Kanal-ID 2001",
+                           "Nachrichten: 252", "geheim (Kanal-ID 2005)", sums_path.name,
+                           f"SHA-256 der Prüfsummendatei: {sha256_file(sums_path)}"):
+                self.assertIn(needle, proto)
+            sums = sums_path.read_text("utf-8").splitlines()
+            listed = {line.split(" *", 1)[1] for line in sums}
+            self.assertIn("CollectnTrade Community/Allgemein - willkommen [2001].html", listed)
+            self.assertIn("CollectnTrade Community/_Medien/7001_glurak.png", listed)
+            for line in sums:
+                digest, rel = line.split(" *", 1)
+                self.assertEqual(sha256_file(Path(tmp) / rel), digest, rel)
 
     def test_cancel(self):
         exporter = ApiExporter(self.client)

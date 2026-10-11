@@ -117,7 +117,7 @@ def write_raw_json(ctx: RenderContext, path: Path) -> None:
 CSV_COLUMNS = [
     "Nachrichten-ID", "Zeitstempel (UTC)", "Datum (lokal)", "Autor-ID", "Benutzername", "Anzeigename",
     "Bot", "Inhalt", "Anhänge", "Embeds", "Reaktionen", "Antwort auf", "Bearbeitet (UTC)", "Angeheftet",
-    "Typ",
+    "Typ", "Link",
 ]
 
 
@@ -143,6 +143,7 @@ def write_csv(ctx: RenderContext, path: Path) -> None:
                 m.get("edited_timestamp") or "",
                 "ja" if m.get("pinned") else "",
                 m.get("type", 0),
+                m.get("link") or "",
             ])
 
 
@@ -187,14 +188,14 @@ def write_txt(ctx: RenderContext, path: Path) -> None:
         stamp = fmt_datetime(ts) if ts else ""
         sys_text = system_text(m, ctx.resolver)
         if sys_text:
-            lines += [f"[{stamp}] *** {sys_text}", ""]
+            lines += [f"[{stamp}] *** {sys_text}  [ID {m['id']}]", ""]
             continue
-        head = f"[{stamp}] {display_name(m['author'])}"
+        head = f"[{stamp}] {display_name(m['author'])} (@{m['author']['username']}, Nutzer-ID {m['author']['id']})"
         if m.get("edited_timestamp"):
             head += " (bearbeitet)"
         if m.get("pinned"):
             head += " (angeheftet)"
-        lines.append(head)
+        lines.append(head + f"  [ID {m['id']}]")
         ref = m.get("referenced_message")
         if ref:
             preview = render_plain(ref["content"], ctx.resolver).replace("\n", " ")[:80]

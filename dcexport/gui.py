@@ -616,7 +616,11 @@ class App(tk.Tk):
         if summary.errors:
             messagebox.showerror("Export", "Export mit Fehlern beendet:\n\n" + "\n".join(summary.errors[:5]))
         elif not summary.cancelled and summary.files:
-            if messagebox.askyesno("Export fertig", summary.text() + "\n\nZielordner öffnen?"):
+            proto = ""
+            if summary.protocol_files:
+                proto = ("\n\nExportprotokoll und SHA-256-Prüfsummen:\n"
+                         + "\n".join(Path(p).name for p in summary.protocol_files))
+            if messagebox.askyesno("Export fertig", summary.text() + proto + "\n\nZielordner öffnen?"):
                 try:
                     open_path(out_dir)
                 except OSError:

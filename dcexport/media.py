@@ -57,6 +57,10 @@ class MediaStore:
         self._names.add(candidate.lower())
         return self.folder / candidate
 
+    def files(self) -> list[Path]:
+        """Alle in diesem Lauf genutzten lokalen Dateien."""
+        return sorted({p for p in self._done.values() if p})
+
     def local(self, url: str) -> Path | None:
         """Bereits geladene Datei zu einer URL, ohne Download."""
         return self._done.get(self._key(url))

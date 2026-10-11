@@ -82,6 +82,7 @@ main{padding:8px 0 24px}
 .tag{background:var(--blurple);color:#fff;font-size:10px;font-weight:600;padding:1px 4px;border-radius:3px;
 position:relative;top:-2px}
 .head time{font-size:12px;color:var(--muted)}
+.head a.ts,.msg a.ts,.system a.ts{color:inherit;text-decoration:none}a.ts:hover{text-decoration:underline}
 .msg{position:relative;margin:0 -16px 0 -72px;padding:1px 16px 1px 72px}
 .msg .side{position:absolute;left:0;width:64px;text-align:right;font-size:11px;color:var(--muted);visibility:hidden;
 top:4px}
@@ -388,6 +389,15 @@ class HtmlRenderer:
 
     # -------------------------------------------------------------- Ablauf
 
+    @staticmethod
+    def stamp(m: dict, ts, shown: str, cls: str = "") -> str:
+        """Zeitstempel, verlinkt auf die Nachricht in Discord (zum Nachprüfen)."""
+        title = esc(f"{fmt_datetime(ts, seconds=True)} · Nachrichten-ID {m['id']}")
+        attr = f' class="{cls}"' if cls else ""
+        timetag = f'<time{attr} datetime="{esc(m["timestamp"])}" title="{title}">{esc(shown)}</time>'
+        link = web(m.get("link"))
+        return f'<a class="ts" href="{link}" target="_blank" rel="noopener">{timetag}</a>' if link else timetag
+
     def messages_html(self) -> str:
         out: list[str] = []
         last_day = None
@@ -414,7 +424,7 @@ class HtmlRenderer:
                 icon = SYSTEM_ICONS.get(m.get("type"), "•")
                 out.append(f'<div class="system" id="m-{esc(m["id"])}" data-author="{esc(display_name(m["author"]))}">'
                            f'<span class="sicon">{icon}</span><span>{esc(sys_text)}</span>'
-                           f'<time datetime="{esc(m["timestamp"])}">{esc(fmt_datetime(ts))}</time></div>')
+                           f'{self.stamp(m, ts, fmt_datetime(ts))}</div>')
                 prev = None
                 continue
             author = m["author"]
@@ -432,12 +442,12 @@ class HtmlRenderer:
                 out.append(
                     f'<article class="group">{self.reply_bar(m)}<img class="avatar" src="{self.avatar(author)}" '
                     f'alt="" loading="lazy"><div class="gbody"><div class="head"><span class="name"{style} '
-                    f'title="{title}">{name}</span>{tag}<time datetime="{esc(m["timestamp"])}" '
-                    f'title="{esc(fmt_datetime(ts, seconds=True))}">{esc(fmt_datetime(ts))}</time></div>')
+                    f'title="{title} · Nutzer-ID {esc(author["id"])}">{name}</span>{tag}'
+                    f'{self.stamp(m, ts, fmt_datetime(ts))}</div>')
                 group_open = True
                 side = ""
             else:
-                side = f'<time class="side" title="{esc(fmt_datetime(ts, seconds=True))}">{esc(fmt_time(ts))}</time>'
+                side = self.stamp(m, ts, fmt_time(ts), cls="side")
             out.append(f'<div class="msg" id="m-{esc(m["id"])}" data-author="{name}">{side}{self.body(m)}</div>')
             prev = (author["id"], ts)
         close_group()
