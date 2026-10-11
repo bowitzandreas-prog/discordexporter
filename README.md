@@ -18,22 +18,25 @@ Ausgabeformate, frei kombinierbar:
 Dazu bei jedem Lauf ein Exportprotokoll und SHA-256-Prüfsummen, siehe
 [Beweissicherung](#beweissicherung).
 
-## Zwei Quellen
+## Drei Wege
 
 **Server-Kanäle per Bot-Token.** Ein eigener Bot wird auf den Server
 eingeladen und liest Text-, Ankündigungs-, Sprach- und Forenkanäle samt
 Threads. Erfasst werden Inhalte, Anhänge, Embeds, Reaktionen, Antworten,
 Sticker, Umfragen, weitergeleitete Nachrichten, Spitznamen und Rollenfarben.
 
-**Eigene DMs aus dem Datenpaket.** Direktnachrichten kann ein Bot nicht lesen.
-Discord stellt dafür ein Datenpaket bereit (Einstellungen → Daten &
-Privatsphäre → „Alle meine Daten anfordern“). Das Werkzeug liest die
-`package.zip` direkt, alte und neue Paketstruktur. Das Paket enthält nur die
-eigenen Nachrichten, nie die der Gegenseite.
+**Eigenes Konto per Benutzer-Token.** Liest alles, was du in Discord selbst
+siehst: Direktnachrichten und Gruppen **mit beiden Seiten** sowie Server ohne
+Bot. **Risiko:** Discord verbietet das Automatisieren von Benutzerkonten
+(„Self-Bot“) und kann das Konto dafür sperren. Das Werkzeug fragt vor der
+ersten Nutzung nach und speichert den Token nicht. Siehe
+[Eigenes Konto](#eigenes-konto-benutzer-token).
 
-Einen Modus mit dem eigenen Konto-Token gibt es bewusst nicht. Das Auslesen
-mit dem Benutzer-Token („Self-Bot“) verstößt gegen die Discord-Nutzungsbedingungen
-und kann zur Kontosperre führen.
+**Eigene DMs aus dem Datenpaket.** Der regelkonforme Weg für Direktnachrichten.
+Discord stellt ein Datenpaket bereit (Einstellungen → Daten & Privatsphäre →
+„Alle meine Daten anfordern“). Das Werkzeug liest die `package.zip` direkt, alte
+und neue Paketstruktur. Das Paket enthält nur die eigenen Nachrichten, nie die
+der Gegenseite.
 
 ## Einmalig einrichten
 
@@ -75,10 +78,11 @@ Der Token wird nicht gespeichert. Steht er in der Umgebungsvariablen
 
 ## Bedienung
 
-Reiter „Server-Kanäle (Bot)“: Token eintragen, „Verbinden“, Kanäle anhaken.
-Ein Haken an Server oder Kategorie wählt alles darunter. Reiter „Eigene DMs
-(Datenpaket)“: `package.zip` wählen, Unterhaltungen anhaken, mit dem Filter
-lassen sich lange DM-Listen eingrenzen.
+Reiter „Discord-API“: oben Bot-Token oder eigenes Konto wählen, Token eintragen,
+„Verbinden“, Kanäle anhaken. Ein Haken an Server oder Kategorie wählt alles
+darunter; mit eigenem Konto stehen die Direktnachrichten ganz oben, neueste
+zuerst. Reiter „Datenpaket“: `package.zip` wählen, Unterhaltungen anhaken, mit
+dem Filter lassen sich lange DM-Listen eingrenzen.
 
 Unten Formate, Zeitraum (`TT.MM.JJJJ`, das Enddatum zählt mit) und Zielordner
 wählen, dann „Export starten“. Exportiert wird immer der gerade offene Reiter.
@@ -94,6 +98,8 @@ Discord-Export\
     Allgemein - handel [123456789].json
     Allgemein - handel - Tausch Glurak [234567890].html   (Thread)
     _Medien\                                             (Anhänge, Avatare, Emojis)
+  Direktnachrichten\                                    (eigenes Konto)
+    DM mit misty (@misty) [456789012].html
   Datenpaket andi\
     DM mit misty#0 [345678901].html
 ```
@@ -107,12 +113,31 @@ weitergibt, gibt den Ordner `_Medien` mit.
 Ein zweiter Export in denselben Ordner überschreibt die Dateien und lädt nur
 fehlende Medien nach.
 
+## Eigenes Konto (Benutzer-Token)
+
+Discord verbietet das Automatisieren von Benutzerkonten. Das Konto kann dafür
+gesperrt werden, auch dauerhaft. Wer diesen Weg wählt, trägt das Risiko selbst.
+Das Werkzeug versucht nicht, sich zu tarnen: Es meldet sich mit eigenem
+User-Agent und hält die Rate-Limits ein.
+
+Token holen (im Browser, nicht in der Discord-App):
+
+1. https://discord.com/app öffnen und anmelden.
+2. F12 → Reiter „Netzwerk“ → im Filter `api` eingeben.
+3. In Discord einen Kanal anklicken, links eine Anfrage wählen (z. B. `messages?limit=50`).
+4. Unter „Anfrage-Header“ den Wert von `authorization` kopieren.
+
+Der Token gibt vollen Zugriff auf das Konto: nie weitergeben, nicht in Skripte
+schreiben. Abmelden im Browser oder ein Passwortwechsel macht ihn ungültig.
+Für die Kommandozeile kann er in der Umgebungsvariablen `DISCORD_USER_TOKEN`
+stehen.
+
 ## Beweissicherung
 
 Jeder Export schreibt zusätzlich zwei Dateien in den Zielordner:
 
 - `Exportprotokoll_<Datum_Zeit>.txt`: wann, von wem (Windows-Benutzer, Rechner), aus welcher Quelle
-  (Bot mit ID bzw. Datenpaket mit SHA-256), welcher Zeitraum, je Kanal Anzahl sowie erste und letzte
+  (Bot oder Konto mit ID bzw. Datenpaket mit SHA-256), welcher Zeitraum, je Kanal Anzahl sowie erste und letzte
   Nachricht mit ID, übersprungene Kanäle mit Grund.
 - `Pruefsummen_<Datum_Zeit>.sha256`: SHA-256 jeder erzeugten Datei samt Medien. Damit lässt sich
   später zeigen, dass seit dem Export nichts verändert wurde. Der Prüfbefehl für PowerShell steht im
@@ -129,10 +154,12 @@ Vorgehen, das sich bewährt hat (keine Rechtsberatung):
 
 1. Früh sichern. Löscht die Gegenseite Nachrichten, sind sie auch im Export weg.
 2. Server-Kanal: per Bot exportieren, das enthält beide Seiten.
-3. Direktnachrichten: Datenpaket für die eigene Seite. Die Gegenseite zusätzlich im Discord-Client
-   mit Bildschirmfotos oder einer Bildschirmaufnahme sichern, mit sichtbarem Datum. Dazu die Nutzer-ID
-   der Gegenseite notieren (Einstellungen → Erweitert → Entwicklermodus, dann Rechtsklick auf den
-   Namen → „Nutzer-ID kopieren“). Der Anzeigename lässt sich ändern, die ID nicht.
+3. Direktnachrichten: Mit eigenem Konto (Benutzer-Token, Risiko siehe oben) kommen beide Seiten
+   in den Export. Regelkonform ist nur das Datenpaket, das enthält aber nur die eigene Seite; die
+   Gegenseite dann im Discord-Client mit Bildschirmfotos oder einer Bildschirmaufnahme sichern, mit
+   sichtbarem Datum. In jedem Fall die Nutzer-ID der Gegenseite notieren (Einstellungen → Erweitert →
+   Entwicklermodus, dann Rechtsklick auf den Namen → „Nutzer-ID kopieren“). Der Anzeigename lässt
+   sich ändern, die ID nicht.
 4. Exportordner nicht mehr bearbeiten, eine Kopie auf einen zweiten Datenträger legen.
    Protokoll und Prüfsummendatei per Mail an sich selbst oder an den Anwalt schicken; das belegt,
    dass der Stand zu diesem Zeitpunkt existierte.
@@ -156,14 +183,18 @@ py -3 discord_export.py export --channel 123456789 --channel 987654321 `
 # Ganzen Server inkl. Threads
 py -3 discord_export.py export --guild 111222333 --out D:\Archiv\Discord
 
+# Eigenes Konto: DMs auflisten, alle DMs exportieren (Token aus DISCORD_USER_TOKEN)
+py -3 discord_export.py list --user
+py -3 discord_export.py export --user --all-dms --format html,json,txt --out D:\Archiv\DMs
+
 # Datenpaket: Unterhaltungen auflisten, dann alles exportieren
 py -3 discord_export.py package C:\Users\Andreas\Downloads\package.zip --list
 py -3 discord_export.py package C:\Users\Andreas\Downloads\package.zip --all --out D:\Archiv\DMs
 ```
 
 Formate für `--format`: `html, json, rawjson, csv, txt, md`. Weitere Schalter:
-`--to`, `--no-media`, `--no-threads`, `--csv-delimiter tab`. Der Token kommt
-aus `--token` oder `DISCORD_BOT_TOKEN`. Rückgabewert 0 = ok, 1 = Fehler,
+`--to`, `--no-media`, `--no-threads`, `--csv-delimiter tab`, `--user`, `--all-dms`.
+Der Token kommt aus `--token` oder `DISCORD_BOT_TOKEN` (mit `--user`: `DISCORD_USER_TOKEN`). Rückgabewert 0 = ok, 1 = Fehler,
 2 = nichts gefunden.
 
 ## Grenzen

@@ -27,7 +27,7 @@ from dcexport.util import (date_range_to_utc, datetime_to_snowflake, parse_date_
                            parse_timestamp, sanitize_filename, snowflake_to_datetime)
 from dcexport.protocol import sha256_file  # noqa: E402
 from dcexport.writers import FORMATS  # noqa: E402
-from mock_discord import START, TOKEN, MockDiscord, sf  # noqa: E402
+from mock_discord import START, TOKEN, USER_TOKEN, MockDiscord, sf  # noqa: E402
 
 ALL_FORMATS = set(FORMATS)
 
@@ -343,6 +343,36 @@ class ApiTests(unittest.TestCase):
                 digest, rel = line.split(" *", 1)
                 self.assertEqual(sha256_file(Path(tmp) / rel), digest, rel)
 
+    def test_user_token_dms(self):
+        client = DiscordClient(USER_TOKEN, user_token=True, base_url=self.mock.api, log=self.logs.append)
+        exporter = ApiExporter(client, log=self.logs.append)
+        guilds = exporter.connect()
+        self.assertEqual(guilds[0].guild["id"], "@me")
+        dms = guilds[0].channels
+        self.assertEqual([c.name for c in dms], ["Gruppe: misty, Old School", "DM mit misty (@misty)"])
+        self.assertTrue(all(c.is_dm for c in dms))
+        self.assertEqual(self.mock.auth_headers, {USER_TOKEN})  # ohne "Bot "-Präfix
+        server_channels = [c for c in guilds[1].channels if c.name == "willkommen"]
+        with tempfile.TemporaryDirectory() as tmp:
+            opts = ExportOptions(out_dir=tmp, formats={"html", "json", "txt"}, include_threads=True)
+            summary = exporter.export(dms + server_channels, opts)
+            self.assertFalse(summary.errors, summary.errors)
+            self.assertEqual(summary.channels, 3)
+            out = Path(tmp) / "Direktnachrichten"
+            data = json.loads((out / "DM mit misty (@misty) [6001].json").read_text("utf-8"))
+            self.assertEqual([m["author"]["username"] for m in data["messages"]], ["misty", "andi", "misty"])
+            self.assertTrue(data["messages"][0]["link"].startswith("https://discord.com/channels/@me/6001/"))
+            proto = Path(summary.protocol_files[0]).read_text("utf-8")
+            self.assertIn("Benutzer-Token), Konto „andi“ (ID 4001)", proto)
+            self.assertTrue((Path(tmp) / "CollectnTrade Community" / "Allgemein - willkommen [2001].html").exists())
+        # Mitglieder-Endpunkt nach dem ersten 403 nicht mehr gefragt, Threads-Endpunkt einmal
+        self.assertLessEqual(self.mock.user_forbidden, 2)
+        self.assertFalse(any("Message Content Intent" in line for line in self.logs))
+
+    def test_bot_token_has_no_dms(self):
+        exporter = ApiExporter(self.client)
+        self.assertNotIn("@me", [gd.guild["id"] for gd in exporter.connect()])
+
     def test_cancel(self):
         exporter = ApiExporter(self.client)
         guilds = exporter.connect()
@@ -380,6 +410,9 @@ class GuiSmokeTest(unittest.TestCase):
                 setattr(messagebox, name, lambda *a, **k: False)
             try:
                 app = gui.App()
+                app.token_mode.set("user")
+                app._mode_changed()  # Warnung abgelehnt (gepatcht: False) → zurück auf Bot
+                self.assertEqual(app.token_mode.get(), "bot")
                 client = DiscordClient(TOKEN, base_url=mock.api, log=app.log, cancel=app.cancel)
                 exporter = ApiExporter(client, log=app.log)
                 app._on_api_loaded((exporter, exporter.connect()))

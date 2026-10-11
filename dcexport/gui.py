@@ -17,7 +17,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from . import APP_NAME, __version__
 from .api import DiscordClient
-from .exporter import ApiExporter, PackageExporter, Summary
+from .exporter import DM_GUILD_ID, ApiExporter, PackageExporter, Summary
 from .model import CHANNEL_TYPES, ExportOptions
 from .package import DataPackage
 from .util import date_range_to_utc, parse_date_input
@@ -55,12 +55,33 @@ Wichtig: Das Paket enthält nur DEINE eigenen Nachrichten,
 nicht die Antworten der anderen Seite. Anhang-Links im Paket
 sind oft schon abgelaufen; der Download wird trotzdem versucht."""
 
-HELP_USERTOKEN = """Warum kein Benutzer-Token?
+HELP_USERTOKEN = """Eigenes Konto (Benutzer-Token)
 
-Das Auslesen mit dem eigenen Konto-Token („Self-Bot“) verstößt gegen die
-Discord-Nutzungsbedingungen und kann zur Sperre des Kontos führen.
-Deshalb nutzt dieses Tool nur die zwei erlaubten Wege:
-Bot-Token (Server-Kanäle) und das offizielle Datenpaket (eigene DMs)."""
+Damit liest das Tool alles, was du in Discord selbst siehst: Direktnachrichten
+und Gruppen mit beiden Seiten sowie Server, auf denen kein Bot ist.
+
+RISIKO: Discord verbietet das Automatisieren von Benutzerkonten („Self-Bot“)
+und kann das Konto dafür sperren. Das Risiko trägst du.
+
+Token holen (im Browser, nicht in der Discord-App):
+1. https://discord.com/app öffnen und anmelden.
+2. F12 drücken → Reiter „Netzwerk“ → oben im Filter „api“ eingeben.
+3. In Discord einen Kanal anklicken, dann links eine Anfrage wählen
+   (z. B. „messages?limit=50“).
+4. Unter „Anfrage-Header“ den Wert von „authorization“ kopieren.
+
+Der Token ist so viel wert wie dein Passwort: nie weitergeben.
+Das Tool speichert ihn nicht. Abmelden im Browser oder ein
+Passwortwechsel macht ihn ungültig."""
+
+USER_MODE_WARNING = """Achtung: Export mit deinem eigenen Konto
+
+Discord verbietet das Automatisieren von Benutzerkonten. Das Konto kann
+dafür gesperrt werden – auch dauerhaft. Das Risiko trägst du.
+
+Den Token nie an andere weitergeben: Er erlaubt vollen Zugriff auf dein Konto.
+
+Trotzdem mit dem eigenen Konto fortfahren?"""
 
 
 def fmt_int(value: int) -> str:
@@ -241,8 +262,8 @@ class App(tk.Tk):
 
         self.notebook = ttk.Notebook(outer)
         self.notebook.grid(row=0, column=0, sticky="nsew")
-        self.notebook.add(self._build_api_tab(self.notebook), text="  Server-Kanäle (Bot)  ")
-        self.notebook.add(self._build_package_tab(self.notebook), text="  Eigene DMs (Datenpaket)  ")
+        self.notebook.add(self._build_api_tab(self.notebook), text="  Discord-API (Bot oder eigenes Konto)  ")
+        self.notebook.add(self._build_package_tab(self.notebook), text="  Datenpaket (offline)  ")
 
         self._build_options(outer).grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
@@ -261,32 +282,43 @@ class App(tk.Tk):
     def _build_api_tab(self, parent) -> ttk.Frame:
         tab = ttk.Frame(parent, padding=10)
         tab.columnconfigure(1, weight=1)
-        tab.rowconfigure(2, weight=1)
+        tab.rowconfigure(3, weight=1)
 
-        ttk.Label(tab, text="Bot-Token:").grid(row=0, column=0, sticky="w")
+        mode = ttk.Frame(tab)
+        mode.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
+        ttk.Label(mode, text="Anmelden mit:").pack(side="left")
+        self.token_mode = tk.StringVar(value="bot")
+        self.user_mode_ok = False
+        ttk.Radiobutton(mode, text="Bot-Token (Server-Kanäle)", value="bot", variable=self.token_mode,
+                        command=self._mode_changed).pack(side="left", padx=(8, 0))
+        ttk.Radiobutton(mode, text="Eigenes Konto (Benutzer-Token, inkl. DMs)", value="user",
+                        variable=self.token_mode, command=self._mode_changed).pack(side="left", padx=(12, 0))
+
+        self.token_label = tk.StringVar(value="Bot-Token:")
+        ttk.Label(tab, textvariable=self.token_label).grid(row=1, column=0, sticky="w")
         self.token = tk.StringVar(value=os.environ.get("DISCORD_BOT_TOKEN", ""))
         self.token_entry = ttk.Entry(tab, textvariable=self.token, show="•")
-        self.token_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        self.token_entry.grid(row=1, column=1, sticky="ew", padx=6)
         self.show_token = tk.BooleanVar(value=False)
         ttk.Checkbutton(tab, text="anzeigen", variable=self.show_token,
                         command=lambda: self.token_entry.configure(show="" if self.show_token.get() else "•")
-                        ).grid(row=0, column=2)
+                        ).grid(row=1, column=2)
         self.connect_btn = ttk.Button(tab, text="Verbinden", command=self._connect)
-        self.connect_btn.grid(row=0, column=3, padx=(6, 0))
+        self.connect_btn.grid(row=1, column=3, padx=(6, 0))
         self.token_entry.bind("<Return>", lambda _e: self._connect())
 
         self.api_status = tk.StringVar(value="Nicht verbunden. Bot-Token eintragen und „Verbinden“ klicken.")
         ttk.Label(tab, textvariable=self.api_status, style="Hint.TLabel").grid(
-            row=1, column=0, columnspan=4, sticky="w", pady=(6, 6))
+            row=2, column=0, columnspan=4, sticky="w", pady=(6, 6))
 
         self.api_tree = CheckTree(tab, [("type", "Typ", 130), ("id", "ID", 170)], "Server / Kanal")
-        self.api_tree.grid(row=2, column=0, columnspan=4, sticky="nsew")
+        self.api_tree.grid(row=3, column=0, columnspan=4, sticky="nsew")
 
         bar = ttk.Frame(tab)
-        bar.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        bar.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         ttk.Button(bar, text="Alle", command=lambda: self.api_tree.set_all(1)).pack(side="left")
         ttk.Button(bar, text="Keine", command=lambda: self.api_tree.set_all(0)).pack(side="left", padx=4)
-        ttk.Button(bar, text="Warum kein Benutzer-Token?",
+        ttk.Button(bar, text="Eigenes Konto – Anleitung & Risiko",
                    command=lambda: messagebox.showinfo("Benutzer-Token", HELP_USERTOKEN)).pack(side="right")
         ttk.Button(bar, text="Bot einrichten – Anleitung", command=self._help_bot).pack(side="right", padx=4)
         return tab
@@ -454,19 +486,38 @@ class App(tk.Tk):
 
     # ----------------------------------------------------------- Verbinden
 
+    def _mode_changed(self) -> None:
+        user = self.token_mode.get() == "user"
+        if user and not self.user_mode_ok:
+            if not messagebox.askyesno("Eigenes Konto", USER_MODE_WARNING, icon="warning"):
+                self.token_mode.set("bot")
+                return
+            self.user_mode_ok = True
+        self.token_label.set("Benutzer-Token:" if user else "Bot-Token:")
+        env = os.environ.get("DISCORD_USER_TOKEN" if user else "DISCORD_BOT_TOKEN", "")
+        other = os.environ.get("DISCORD_BOT_TOKEN" if user else "DISCORD_USER_TOKEN", "")
+        if not self.token.get().strip() or self.token.get().strip() == other:
+            self.token.set(env)
+        self.api_status.set("Nicht verbunden. " + ("Benutzer-Token" if user else "Bot-Token")
+                            + " eintragen und „Verbinden“ klicken.")
+
     def _connect(self) -> None:
         if self.worker and self.worker.is_alive():
             return
         token = self.token.get().strip()
+        user = self.token_mode.get() == "user"
         if not token:
-            messagebox.showwarning("Bot-Token fehlt", "Bitte einen Bot-Token eintragen.\n\n" + HELP_BOT)
+            if user:
+                messagebox.showwarning("Token fehlt", "Bitte deinen Benutzer-Token eintragen.\n\n" + HELP_USERTOKEN)
+            else:
+                messagebox.showwarning("Bot-Token fehlt", "Bitte einen Bot-Token eintragen.\n\n" + HELP_BOT)
             return
         self.api_status.set("Verbinde …")
-        self._run(self._connect_worker, token)
+        self._run(self._connect_worker, token, user)
 
-    def _connect_worker(self, token: str) -> None:
+    def _connect_worker(self, token: str, user: bool = False) -> None:
         try:
-            client = DiscordClient(token, log=self.log, cancel=self.cancel)
+            client = DiscordClient(token, user_token=user, log=self.log, cancel=self.cancel)
             exporter = ApiExporter(client, log=self.log)
             guilds = exporter.connect()
             self.events.put(("api_loaded", (exporter, guilds)))
@@ -481,7 +532,10 @@ class App(tk.Tk):
         tree.clear()
         channel_count = 0
         for gd in guilds:
-            g = tree.insert("", gd.guild.get("name", "?"), values=("Server", gd.guild["id"]), open_=len(guilds) == 1)
+            is_dm = gd.guild["id"] == DM_GUILD_ID
+            g = tree.insert("", gd.guild.get("name", "?"), values=("Direktnachrichten" if is_dm else "Server",
+                                                                  "" if is_dm else gd.guild["id"]),
+                            open_=len(guilds) == 1 or is_dm)
             cats: dict[str, str] = {}
             for ch in gd.channels:
                 parent = g
@@ -489,12 +543,16 @@ class App(tk.Tk):
                     if ch.category not in cats:
                         cats[ch.category] = tree.insert(g, ch.category.upper(), values=("Kategorie", ""), open_=True)
                     parent = cats[ch.category]
-                prefix = "🔊 " if ch.type in (2, 13) else ("🗂 " if ch.type in (15, 16) else "# ")
+                prefix = "🔊 " if ch.type in (2, 13) else ("🗂 " if ch.type in (15, 16) else
+                                                          ("@ " if ch.is_dm else "# "))
                 tree.insert(parent, prefix + ch.name, payload=ch,
                             values=(CHANNEL_TYPES.get(ch.type, str(ch.type)), ch.id))
                 channel_count += 1
         bot = (exporter.bot_user or {}).get("username", "?")
-        self.api_status.set(f"Verbunden als {bot} – {len(guilds)} Server, {channel_count} Kanäle. "
+        servers = sum(1 for gd in guilds if gd.guild["id"] != DM_GUILD_ID)
+        dms = sum(len(gd.channels) for gd in guilds if gd.guild["id"] == DM_GUILD_ID)
+        dm_text = f", {dms} Direktnachrichten" if exporter.client.is_user else ""
+        self.api_status.set(f"Verbunden als {bot} – {servers} Server{dm_text}, {channel_count} Kanäle. "
                             f"Kanäle anhaken und unten exportieren.")
         if not guilds:
             self.api_status.set(f"Verbunden als {bot}, aber der Bot ist auf keinem Server. Erst einladen "

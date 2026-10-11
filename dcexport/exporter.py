@@ -14,7 +14,7 @@ from .html_writer import write_html
 from .markdown import Resolver, _EMOJI
 from .media import MediaStore, short_hash
 from .model import (THREAD_ONLY_TYPES, ChannelInfo, ExportOptions, MESSAGE_CHANNEL_TYPES, display_name,
-                    emoji_url, guild_icon_url, normalize_api_message)
+                    emoji_url, guild_icon_url, normalize_api_message, normalize_user)
 from .package import DataPackage, PackageConversation
 from .protocol import channel_entry, message_link, sha256_file, write_protocol
 from .util import datetime_to_snowflake, parse_timestamp, sanitize_filename, snowflake_to_datetime
@@ -25,6 +25,7 @@ WRITERS = {
     "csv": write_csv, "txt": write_txt, "md": write_markdown,
 }
 MEDIA_DIR = "_Medien"
+DM_GUILD_ID = "@me"  # Pseudo-Server für Direktnachrichten (Benutzer-Token)
 
 LogFn = Callable[[str], None]
 ProgressFn = Callable[[int, int, float, str], None]
@@ -147,13 +148,22 @@ class ApiExporter:
     @property
     def source_label(self) -> str:
         name = (self.bot_user or {}).get("username", "?")
-        return f"Discord-API (Bot {name})"
+        return f"Discord-API (Konto {name})" if self.client.is_user else f"Discord-API (Bot {name})"
+
+    @property
+    def source_line(self) -> str:
+        me = self.bot_user or {}
+        if self.client.is_user:
+            return f"Discord-API (Benutzer-Token), Konto „{me.get('username', '?')}“ (ID {me.get('id', '?')})"
+        return f"Discord-API (Bot-Token), Bot „{me.get('username', '?')}“ (ID {me.get('id', '?')})"
 
     # ------------------------------------------------------------ Auflisten
 
     def connect(self) -> list[GuildData]:
         self.bot_user = self.client.me()
         self.guilds.clear()
+        if self.client.is_user:
+            self.guilds[DM_GUILD_ID] = self._dm_data(self.client.private_channels())
         for g in self.client.guilds():
             try:
                 raw_channels = self.client.guild_channels(g["id"])
@@ -162,6 +172,24 @@ class ApiExporter:
                 raw_channels = []
             self.guilds[g["id"]] = self._guild_data(g, raw_channels)
         return list(self.guilds.values())
+
+    @staticmethod
+    def _dm_data(raw_channels: list[dict]) -> GuildData:
+        """Direktnachrichten als eigener Knoten, neueste Unterhaltung zuerst."""
+        channels = []
+        for c in sorted(raw_channels, key=lambda c: int(c.get("last_message_id") or 0), reverse=True):
+            ctype = c.get("type")
+            people = [normalize_user(u) for u in c.get("recipients") or []]
+            if ctype == 1:
+                who = people[0] if people else None
+                name = f"DM mit {display_name(who)} (@{who['username']})" if who else f"DM {c['id']}"
+            elif ctype == 3:
+                name = "Gruppe: " + (c.get("name") or ", ".join(display_name(p) for p in people) or c["id"])
+            else:
+                continue
+            channels.append(ChannelInfo(id=c["id"], name=name, type=ctype, last_message_id=c.get("last_message_id")))
+        guild = {"id": DM_GUILD_ID, "name": "Direktnachrichten"}
+        return GuildData(guild=guild, channels=channels, all_channels={c.id: c.name for c in channels})
 
     @staticmethod
     def _guild_data(g: dict, raw_channels: list[dict]) -> GuildData:
@@ -249,7 +277,7 @@ class ApiExporter:
             for ch in selected:
                 if ch.type not in THREAD_ONLY_TYPES:
                     targets.append((ch, False))
-                if options.include_threads or ch.type in THREAD_ONLY_TYPES:
+                if not ch.is_dm and (options.include_threads or ch.type in THREAD_ONLY_TYPES):
                     self.log(f"Suche Threads in #{ch.name} …")
                     targets += [(t, True) for t in self.threads_for(ch, options)]
             for index, (ch, from_expansion) in enumerate(targets):
@@ -285,9 +313,7 @@ class ApiExporter:
         for media in medias.values():
             summary.media_ok += media.downloaded
             summary.media_failed += media.failed
-        bot = self.bot_user or {}
-        _finish_protocol(self.log, out_root, exported_at, summary, options,
-                         [f"Discord-API (Bot-Token), Bot „{bot.get('username', '?')}“ (ID {bot.get('id', '?')})"],
+        _finish_protocol(self.log, out_root, exported_at, summary, options, [self.source_line],
                          [p for m in medias.values() for p in m.files()])
         return summary
 
@@ -313,7 +339,8 @@ class ApiExporter:
         if not messages and skip_empty:
             return [], []
         normal = [m for m in messages if m["type"] in (0, 19)]
-        if len(normal) >= 5 and not any(m["content"] or m["attachments"] or m["embeds"] for m in normal):
+        if (not self.client.is_user and len(normal) >= 5
+                and not any(m["content"] or m["attachments"] or m["embeds"] for m in normal)):
             self.log("  ⚠ Alle Nachrichtentexte sind leer. Im Developer Portal unter „Bot“ den "
                      "„Message Content Intent“ einschalten und neu exportieren.")
 
@@ -330,7 +357,7 @@ class ApiExporter:
                 u = m["referenced_message"]["author"]
                 resolver.users.setdefault(u["id"], display_name(u))
 
-        folder = out_root / sanitize_filename(ch.guild_name or "Discord")
+        folder = out_root / sanitize_filename(ch.guild_name or ("Direktnachrichten" if ch.is_dm else "Discord"))
         media = None
         guild_icon_local = None
         if options.download_media:

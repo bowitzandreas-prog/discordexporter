@@ -24,6 +24,7 @@ def _png(size: int = 16, rgb: tuple = (88, 101, 242)) -> bytes:
 PNG = _png()
 START = datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc)
 TOKEN = "TEST.TOKEN.123"
+USER_TOKEN = "USER.TOKEN.456"
 
 USERS = {
     "4001": {"id": "4001", "username": "andi", "global_name": "Andi", "avatar": "a1b2c3", "discriminator": "0"},
@@ -49,6 +50,8 @@ class MockDiscord:
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.requests: list[str] = []
         self.rate_limited_once = False
+        self.user_forbidden = 0
+        self.auth_headers: set[str] = set()
         self.messages = self._build_messages()
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -119,14 +122,32 @@ class MockDiscord:
             "2002": [self._msg("2002", 30, "4001", "Regel 1: fair handeln.")],
             "2101": [self._msg("2101", 40, "4002", "Biete Glurak, suche Mew.")],
             "2102": [self._msg("2102", 50, "4003", "Hüllen + Toploader.")],
+            "6001": [self._msg("6001", 60, "4002", "Zahlung kommt morgen, versprochen."),
+                     self._msg("6001", 61, "4001", "Ok, Karte geht nach Zahlungseingang raus."),
+                     self._msg("6001", 62, "4002", "Hab bezahlt, Screenshot folgt")],
+            "6002": [self._msg("6002", 70, "4003", "Wer bringt die Booster mit?")],
         }
 
     # ---------------------------------------------------------------- Routen
 
-    def _route(self, path: str, query: dict) -> tuple[int, object, dict]:
+    def _route(self, path: str, query: dict, user: bool = False) -> tuple[int, object, dict]:
         g = {"id": "1000", "name": "CollectnTrade Community", "icon": "ic0n"}
         if path == "/api/v10/users/@me":
+            if user:
+                return 200, USERS["4001"], {}
             return 200, {"id": "9999", "username": "ExportBot", "bot": True}, {}
+        if path == "/api/v10/users/@me/channels":
+            if not user:
+                return 403, {"message": "Bots cannot use this endpoint", "code": 20001}, {}
+            return 200, [
+                {"id": "6002", "type": 3, "name": None, "recipients": [USERS["4002"], USERS["4003"]],
+                 "last_message_id": self.messages["6002"][-1]["id"]},
+                {"id": "6001", "type": 1, "recipients": [USERS["4002"]],
+                 "last_message_id": self.messages["6001"][-1]["id"]},
+            ], {}
+        if user and (path.endswith("/threads/active") or "/members/" in path):
+            self.user_forbidden += 1
+            return 403, {"message": "Missing Access", "code": 50001}, {}
         if path == "/api/v10/users/@me/guilds":
             return 200, [g], {}
         if path == "/api/v10/guilds/1000/channels":
@@ -201,10 +222,12 @@ class MockDiscord:
                     self.end_headers()
                     self.wfile.write(PNG)
                     return
-                if self.headers.get("Authorization") != f"Bot {TOKEN}":
+                auth = self.headers.get("Authorization")
+                mock.auth_headers.add(auth or "")
+                if auth not in (f"Bot {TOKEN}", USER_TOKEN):
                     status, body, headers = 401, {"message": "401: Unauthorized", "code": 0}, {}
                 else:
-                    status, body, headers = mock._route(url.path, parse_qs(url.query))
+                    status, body, headers = mock._route(url.path, parse_qs(url.query), user=auth == USER_TOKEN)
                 data = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")

@@ -7,7 +7,7 @@ import os
 import sys
 
 from .api import DiscordAPIError, DiscordClient
-from .exporter import ApiExporter, PackageExporter
+from .exporter import DM_GUILD_ID, ApiExporter, PackageExporter
 from .model import CHANNEL_TYPES, ExportOptions
 from .package import DataPackage
 from .util import date_range_to_utc, parse_date_input
@@ -31,10 +31,14 @@ def _options(args) -> ExportOptions:
 
 
 def _client(args) -> DiscordClient:
-    token = args.token or os.environ.get("DISCORD_BOT_TOKEN", "")
+    env = "DISCORD_USER_TOKEN" if args.user else "DISCORD_BOT_TOKEN"
+    token = args.token or os.environ.get(env, "")
     if not token:
-        raise SystemExit("Kein Token: --token angeben oder DISCORD_BOT_TOKEN setzen.")
-    return DiscordClient(token, log=_print)
+        raise SystemExit(f"Kein Token: --token angeben oder {env} setzen.")
+    if args.user:
+        _print("Hinweis: Export mit dem eigenen Konto verstößt gegen die Discord-Regeln; "
+               "Discord kann das Konto sperren.")
+    return DiscordClient(token, user_token=args.user, log=_print)
 
 
 def _progress(index: int, total: int, fraction: float, label: str) -> None:
@@ -44,7 +48,8 @@ def _progress(index: int, total: int, fraction: float, label: str) -> None:
 def cmd_list(args) -> int:
     exporter = ApiExporter(_client(args), log=_print)
     for gd in exporter.connect():
-        print(f"\n{gd.guild['name']}  [Server {gd.guild['id']}]")
+        label = "Direktnachrichten" if gd.guild["id"] == DM_GUILD_ID else f"Server {gd.guild['id']}"
+        print(f"\n{gd.guild['name']}  [{label}]")
         for ch in gd.channels:
             cat = f"{ch.category} / " if ch.category else ""
             print(f"  {ch.id}  {CHANNEL_TYPES.get(ch.type, ch.type):<14} {cat}{ch.name}")
@@ -57,6 +62,10 @@ def cmd_export(args) -> int:
     guilds = exporter.connect()
     wanted_channels = set(args.channel or [])
     wanted_guilds = set(args.guild or [])
+    if args.all_dms:
+        if not args.user:
+            raise SystemExit("--all-dms geht nur mit --user (Benutzer-Token).")
+        wanted_guilds.add(DM_GUILD_ID)
     selected = [ch for gd in guilds for ch in gd.channels
                 if ch.id in wanted_channels or gd.guild["id"] in wanted_guilds]
     missing = wanted_channels - {ch.id for ch in selected}
@@ -106,12 +115,17 @@ def build_parser() -> argparse.ArgumentParser:
                                      description="Discord-Kanäle exportieren. Ohne Befehl startet die GUI.")
     sub = parser.add_subparsers(dest="cmd")
 
-    p = sub.add_parser("list", help="Server und Kanäle mit IDs auflisten (Bot-Token)")
-    p.add_argument("--token", help="Bot-Token (sonst Umgebungsvariable DISCORD_BOT_TOKEN)")
+    user_help = ("eigenes Konto statt Bot (Benutzer-Token, sonst DISCORD_USER_TOKEN); "
+                 "verstößt gegen die Discord-Regeln, Kontosperre möglich")
+    p = sub.add_parser("list", help="Server, Kanäle und (mit --user) DMs mit IDs auflisten")
+    p.add_argument("--token", help="Token (sonst Umgebungsvariable DISCORD_BOT_TOKEN bzw. DISCORD_USER_TOKEN)")
+    p.add_argument("--user", action="store_true", help=user_help)
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("export", help="Kanäle per Bot-Token exportieren")
-    p.add_argument("--token", help="Bot-Token (sonst Umgebungsvariable DISCORD_BOT_TOKEN)")
+    p = sub.add_parser("export", help="Kanäle (und mit --user DMs) exportieren")
+    p.add_argument("--token", help="Token (sonst Umgebungsvariable DISCORD_BOT_TOKEN bzw. DISCORD_USER_TOKEN)")
+    p.add_argument("--user", action="store_true", help=user_help)
+    p.add_argument("--all-dms", action="store_true", help="alle Direktnachrichten und Gruppen (nur mit --user)")
     p.add_argument("--channel", action="append", help="Kanal-ID (mehrfach möglich)")
     p.add_argument("--guild", action="append", help="Server-ID: alle Kanäle des Servers (mehrfach möglich)")
     p.add_argument("--no-threads", action="store_true", help="Threads nicht mitexportieren")

@@ -21,11 +21,17 @@ from .util import datetime_to_snowflake
 
 API_BASE = "https://discord.com/api/v10"
 USER_AGENT = f"DiscordBot (https://github.com/bowitzandreas-prog/discordexporter, {__version__})"
+USER_MODE_AGENT = f"DiscordExport/{__version__} (+https://github.com/bowitzandreas-prog/discordexporter)"
 
 ERROR_HINTS = {
     401: "Token ungültig. Erwartet wird ein Bot-Token aus dem Developer Portal (Bot → Reset Token).",
     403: "Kein Zugriff. Dem Bot fehlen Rechte (Kanal ansehen / Nachrichtenverlauf lesen).",
     404: "Nicht gefunden (gelöscht oder Bot nicht auf dem Server).",
+}
+USER_ERROR_HINTS = {
+    401: "Benutzer-Token ungültig oder abgelaufen (nach Abmelden oder Passwortwechsel neu holen).",
+    403: "Kein Zugriff auf diesen Kanal mit deinem Konto.",
+    404: "Nicht gefunden (gelöscht oder kein Zugriff).",
 }
 
 
@@ -34,9 +40,10 @@ class Cancelled(Exception):
 
 
 class DiscordAPIError(Exception):
-    def __init__(self, status: int, message: str, code: int | None = None, path: str = ""):
+    def __init__(self, status: int, message: str, code: int | None = None, path: str = "",
+                 hints: dict | None = None):
         self.status, self.code, self.path = status, code, path
-        hint = ERROR_HINTS.get(status)
+        hint = (hints or ERROR_HINTS).get(status)
         prefix = f"HTTP {status}: " if status else ""
         super().__init__(prefix + message + (f" – {hint}" if hint else ""))
 
@@ -49,13 +56,16 @@ def normalize_token(token: str) -> str:
 
 
 class DiscordClient:
-    def __init__(self, token: str, *, base_url: str = API_BASE,
+    def __init__(self, token: str, *, user_token: bool = False, base_url: str = API_BASE,
                  log: Callable[[str], None] | None = None,
                  cancel: threading.Event | None = None, timeout: float = 30.0,
                  ssl_context: ssl.SSLContext | None = None):
-        self.token = normalize_token(token)
+        """user_token=True: eigenes Konto statt Bot. Verstößt gegen die Discord-Regeln (Self-Bot),
+        der Nutzer muss das ausdrücklich wählen."""
+        self.is_user = user_token
+        self.token = normalize_token(token) if not user_token else (token or "").strip().strip('"').strip("'")
         if not self.token:
-            raise ValueError("Kein Bot-Token angegeben.")
+            raise ValueError("Kein Token angegeben.")
         self.base_url = base_url.rstrip("/")
         self.log = log or (lambda msg: None)
         self.cancel = cancel or threading.Event()
@@ -63,6 +73,7 @@ class DiscordClient:
         self.ssl_context = ssl_context
         self._bucket_wait: dict[str, float] = {}
         self._members: dict[tuple[str, str], dict | None] = {}
+        self._members_off: set[str] = set()  # Server, bei denen der Endpunkt gesperrt ist
 
     # ------------------------------------------------------------------ Kern
 
@@ -84,8 +95,8 @@ class DiscordClient:
             if wait_until > time.monotonic():
                 self._sleep(wait_until - time.monotonic())
             req = urllib.request.Request(url, headers={
-                "Authorization": f"Bot {self.token}",
-                "User-Agent": USER_AGENT,
+                "Authorization": self.token if self.is_user else f"Bot {self.token}",
+                "User-Agent": USER_MODE_AGENT if self.is_user else USER_AGENT,
                 "Accept": "application/json",
             })
             try:
@@ -111,7 +122,8 @@ class DiscordClient:
                     attempts += 1
                     self._sleep(2 ** attempts)
                     continue
-                raise DiscordAPIError(err.code, data.get("message") or err.reason, data.get("code"), path)
+                raise DiscordAPIError(err.code, data.get("message") or err.reason, data.get("code"), path,
+                                      hints=USER_ERROR_HINTS if self.is_user else None)
             except OSError as err:  # URLError, Timeouts, Verbindungsabbrüche
                 reason = getattr(err, "reason", None) or err
                 if attempts < 3:
@@ -175,14 +187,23 @@ class DiscordClient:
             if not before:
                 return
 
+    def private_channels(self) -> list[dict]:
+        """Direktnachrichten und Gruppen-DMs (nur mit Benutzer-Token)."""
+        return self.request("/users/@me/channels")
+
     def member(self, guild_id: str, user_id: str) -> dict | None:
         key = (guild_id, user_id)
+        if guild_id in self._members_off:
+            return None
         if key not in self._members:
             try:
                 self._members[key] = self.request(f"/guilds/{guild_id}/members/{user_id}")
             except DiscordAPIError as err:
-                if err.status in (403, 404):
+                if err.status in (401, 403, 404):
                     self._members[key] = None
+                    # 401/403 gilt für den ganzen Endpunkt (z. B. nur für Bots): nicht weiter fragen
+                    if err.status in (401, 403):
+                        self._members_off.add(guild_id)
                 else:
                     raise
         return self._members[key]
