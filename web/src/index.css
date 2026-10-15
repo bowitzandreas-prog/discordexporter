@@ -1,0 +1,130 @@
+@import 'tailwindcss';
+
+/* Schriften lokal gebündelt: kein Abruf bei Google, Oberfläche funktioniert offline. */
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-ext-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-ext-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-sans/latin-ext-600.css';
+@import '@fontsource/ibm-plex-sans/latin-700.css';
+@import '@fontsource/ibm-plex-sans/latin-ext-700.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-ext-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+@import '@fontsource/ibm-plex-mono/latin-ext-500.css';
+
+@theme {
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+
+  /* Nachtblaue Asservatenkammer: tiefe Tinte, darauf Glas-Paneele */
+  --color-ink-950: #06070d;
+  --color-ink-900: #0b0d18;
+  --color-ink-800: #131729;
+  --color-ink-700: #1b2038;
+  --color-ink-600: #262c4a;
+  --color-fg: #e9ebf8;
+  --color-muted: #a3a8cc;
+  --color-faint: #6f7499;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-strong: rgb(255 255 255 / 0.16);
+
+  --color-blurple: #5865f2;
+  --color-blurple-hi: #8b93ff;
+  --color-blurple-lo: #3b45c4;
+  /* Grün = geprüft/gesichert, Bernstein = Risiko, Rot = Fehler */
+  --color-evidence: #3dd6a0;
+  --color-amber: #f5b544;
+  --color-danger: #ff6b7d;
+
+  --radius-panel: 18px;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-ink-950);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'ss02', 'zero';
+  }
+  ::selection {
+    background: rgb(88 101 242 / 0.45);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-blurple-hi);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  input,
+  button,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+  input[type='date']::-webkit-calendar-picker-indicator {
+    filter: invert(0.8);
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .panel {
+    position: relative;
+    border-radius: var(--radius-panel);
+    background: linear-gradient(180deg, rgb(24 28 52 / 0.78), rgb(14 17 32 / 0.82));
+    border: 1px solid var(--color-line);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.04) inset,
+      0 30px 60px -30px rgb(0 0 0 / 0.7);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+  .field {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--color-line-strong);
+    background: rgb(6 7 13 / 0.55);
+    padding: 0.55rem 0.75rem;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-blurple-hi);
+    box-shadow: 0 0 0 3px rgb(88 101 242 / 0.25);
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

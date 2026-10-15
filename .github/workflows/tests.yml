@@ -24,3 +24,18 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Unit-Tests
         run: python -m unittest discover -s tests -v
+
+  web:
+    name: Weboberfläche bauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Abhängigkeiten
+        working-directory: web
+        run: npm ci
+      - name: Typecheck + Build
+        working-directory: web
+        run: npm run build

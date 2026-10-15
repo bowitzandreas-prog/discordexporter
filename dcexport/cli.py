@@ -114,7 +114,7 @@ def _add_export_args(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="discord_export.py",
-                                     description="Discord-Kanäle exportieren. Ohne Befehl startet die GUI.")
+                                     description="Discord-Kanäle exportieren. Ohne Befehl startet die Oberfläche im Browser.")
     sub = parser.add_subparsers(dest="cmd")
 
     user_help = ("eigenes Konto statt Bot (Benutzer-Token, sonst DISCORD_USER_TOKEN); "
@@ -134,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_export_args(p)
     p.set_defaults(func=cmd_export)
 
+    p = sub.add_parser("web", help="Oberfläche im Browser starten (Standard ohne Befehl)")
+    p.add_argument("--port", type=int, default=None, help="fester Port (Standard 8765, sonst frei)")
+    p.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")
+    sub.add_parser("tk", help="klassische Tkinter-Oberfläche starten")
+
     p = sub.add_parser("package", help="Datenpaket (package.zip oder Ordner) exportieren")
     p.add_argument("path", help="package.zip oder entpackter Ordner")
     p.add_argument("--list", action="store_true", help="Nur Unterhaltungen auflisten")
@@ -151,7 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if not args.cmd:
+    if not args.cmd or args.cmd == "web":
+        from .webui import main as web_main
+        return web_main(port=getattr(args, "port", None), open_browser=not getattr(args, "no_browser", False))
+    if args.cmd == "tk":
         from .gui import main as gui_main
         gui_main()
         return 0

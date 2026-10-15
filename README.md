@@ -1,8 +1,10 @@
 # Discord-Export
 
-Lokales Werkzeug mit Oberfläche, das Discord-Kanäle als Datei sichert. Läuft
-auf dem eigenen PC, braucht nur Python (keine Zusatzpakete) und schickt nichts
-an Dritte; es spricht nur mit `discord.com` und dem Discord-CDN.
+Lokales Werkzeug, das Discord-Kanäle als Datei sichert. Die Oberfläche läuft im
+Browser, der Server dahinter nur auf dem eigenen PC (`127.0.0.1`). Es braucht nur
+Python (keine Zusatzpakete) und schickt nichts an Dritte; es spricht nur mit
+`discord.com` und dem Discord-CDN. Die klassische Fenster-Oberfläche (Tkinter)
+gibt es weiter über `py -3 discord_export.py tk`.
 
 Ausgabeformate, frei kombinierbar:
 
@@ -78,15 +80,30 @@ Der Token wird nicht gespeichert. Steht er in der Umgebungsvariablen
 
 ## Bedienung
 
-Reiter „Discord-API“: oben Bot-Token oder eigenes Konto wählen, Token eintragen,
-„Verbinden“, Kanäle anhaken. Ein Haken an Server oder Kategorie wählt alles
-darunter; mit eigenem Konto stehen die Direktnachrichten ganz oben, neueste
-zuerst, und die Kanäle eines Servers werden erst beim Aufklappen geladen. Reiter „Datenpaket“: `package.zip` wählen, Unterhaltungen anhaken, mit
-dem Filter lassen sich lange DM-Listen eingrenzen.
+Doppelklick auf `Start-DiscordExport.bat` öffnet die Oberfläche im Browser. Das
+schwarze Konsolenfenster bleibt im Hintergrund offen, solange du arbeitest;
+schließt du es, endet das Programm. Öffnet sich kein Browser, steht die Adresse
+(`http://127.0.0.1:8765/#k=…`) im Konsolenfenster zum Kopieren.
 
-Unten Formate, Zeitraum (`TT.MM.JJJJ`, das Enddatum zählt mit) und Zielordner
-wählen, dann „Export starten“. Exportiert wird immer der gerade offene Reiter.
-Formate, Zielordner und Optionen merkt sich das Programm in
+**Schritt 1 – Quelle wählen:** Bot-Token, eigenes Konto oder Datenpaket
+anklicken, Token eintragen bzw. `package.zip` wählen, dann „Verbinden“. Beim
+eigenen Konto muss der Risikohinweis bestätigt werden.
+
+**Schritt 2 – Auswählen:** Kanäle und Unterhaltungen anhaken. Ein Haken an
+Server oder Kategorie wählt alles darunter. Mit eigenem Konto stehen die
+Direktnachrichten oben, neueste zuerst; die Kanäle eines Servers werden erst
+beim Aufklappen geladen. Das Suchfeld filtert lange Listen.
+
+**Schritt 3 – Exportieren:** Formate, Zeitraum und Zielordner wählen, dann
+„Export & Beweissicherung starten“. Danach zeigt die Karte „Beweise gesichert“
+die Zahlen, die SHA-256-Prüfsumme und Knöpfe für Zielordner, HTML und Protokoll.
+
+Die Oberfläche erreicht nur dein eigener Rechner. Jede Anfrage braucht den
+Schlüssel aus der Start-Adresse; andere Webseiten im selben Browser kommen nicht
+an die Daten. Tokens bleiben nur im Speicher und werden nie auf die Platte
+geschrieben. Ohne Browser geht alles auch per Fenster-Oberfläche
+(`py -3 discord_export.py tk`) oder Kommandozeile. Formate, Zielordner und
+Optionen (nie Tokens) merkt sich das Programm in
 `%APPDATA%\DiscordExport\settings.json`.
 
 Ablage im Zielordner:
@@ -213,12 +230,32 @@ Der Token kommt aus `--token` oder `DISCORD_BOT_TOKEN` (mit `--user`: `DISCORD_U
 
 | Datei | Inhalt |
 |---|---|
-| `discord_export.py` | Einstieg: GUI ohne Argumente, sonst Kommandozeile |
+| `discord_export.py` | Einstieg: Weboberfläche ohne Argumente, sonst Kommandozeile |
 | `dcexport/api.py` | REST-Client, Rate-Limits, Seitenweise Abfrage |
 | `dcexport/package.py` | Leser für das Datenpaket (ZIP oder Ordner) |
 | `dcexport/model.py` | Einheitliches Nachrichtenformat |
 | `dcexport/markdown.py` | Discord-Markdown nach HTML bzw. Klartext |
 | `dcexport/exporter.py` | Ablauf: Kanäle, Threads, Mitglieder, Medien, Ausgabe |
 | `dcexport/html_writer.py`, `writers.py` | Ausgabeformate |
-| `dcexport/gui.py`, `cli.py` | Oberfläche (Tkinter) und Kommandozeile |
+| `dcexport/protocol.py` | Exportprotokoll und SHA-256-Prüfsummen |
+| `dcexport/webui.py` | Lokaler HTTP-Server (127.0.0.1) für die Browser-Oberfläche |
+| `dcexport/web_dist/` | fertig gebaute Oberfläche (eingecheckt, kein Node nötig) |
+| `dcexport/gui.py`, `cli.py` | Fenster-Oberfläche (Tkinter) und Kommandozeile |
+| `web/` | Quellcode der Oberfläche (React, Vite, Tailwind) |
 | `tests/` | Tests gegen eine nachgebaute Discord-API (`mock_discord.py`) |
+
+### Oberfläche aus dem Quellcode bauen (nur für Entwicklung)
+
+Die gebaute Oberfläche liegt bereits unter `dcexport/web_dist/`, Nutzer brauchen
+also kein Node. Wer am Aussehen etwas ändert, baut mit Node 20+ neu:
+
+```powershell
+cd web
+npm ci
+npm run build      # schreibt nach ../dcexport/web_dist
+npm run dev        # Entwicklungsserver mit sofortiger Vorschau
+```
+
+Die Animationen und Effekte stammen von [React Bits](https://reactbits.dev)
+(MIT mit Commons-Clause-Zusatz, siehe `web/src/bits/LICENSE-react-bits.md`).
+Die Komponenten sind Teil der Anwendung, werden also nicht einzeln weiterverkauft.

@@ -1,1 +1,3 @@
 *.bat text eol=crlf
+dcexport/web_dist/** binary linguist-generated
+web/package-lock.json binary

@@ -47,6 +47,7 @@ class ChannelInfo:
     last_message_id: str | None = None
     source: str = "api"  # "api" oder "package"
     note: str | None = None
+    icon_url: str | None = None  # Avatar der Gegenseite bei DMs (nur Anzeige)
 
     @property
     def is_thread(self) -> bool:

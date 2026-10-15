@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import os
 import queue
-import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -20,6 +18,7 @@ from .api import DiscordClient
 from .exporter import DM_GUILD_ID, ApiExporter, PackageExporter, Summary
 from .model import CHANNEL_TYPES, ExportOptions
 from .package import DataPackage
+from .settings import load_settings, open_path, save_settings
 from .util import date_range_to_utc, parse_date_input
 from .writers import FORMATS
 
@@ -86,36 +85,6 @@ Trotzdem mit dem eigenen Konto fortfahren?"""
 
 def fmt_int(value: int) -> str:
     return f"{value:,}".replace(",", ".")
-
-
-def settings_path() -> Path:
-    base = os.environ.get("APPDATA") or os.path.join(Path.home(), ".config")
-    return Path(base) / "DiscordExport" / "settings.json"
-
-
-def load_settings() -> dict:
-    try:
-        return json.loads(settings_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def save_settings(data: dict) -> None:
-    try:
-        path = settings_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        pass
-
-
-def open_path(path: str) -> None:
-    if sys.platform.startswith("win"):
-        os.startfile(path)  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", path])
-    else:
-        subprocess.Popen(["xdg-open", path])
 
 
 class CheckTree(ttk.Frame):

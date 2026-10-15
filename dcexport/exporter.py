@@ -205,7 +205,8 @@ class ApiExporter:
                 name = "Gruppe: " + (c.get("name") or ", ".join(display_name(p) for p in people) or c["id"])
             else:
                 continue
-            channels.append(ChannelInfo(id=c["id"], name=name, type=ctype, last_message_id=c.get("last_message_id")))
+            channels.append(ChannelInfo(id=c["id"], name=name, type=ctype, last_message_id=c.get("last_message_id"),
+                                        icon_url=people[0]["avatar_url"] if ctype == 1 and people else None))
         guild = {"id": DM_GUILD_ID, "name": "Direktnachrichten"}
         return GuildData(guild=guild, channels=channels, all_channels={c.id: c.name for c in channels})
 
