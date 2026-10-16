@@ -3,6 +3,7 @@ name: Tests
 on:
   push:
   pull_request:
+  workflow_dispatch: # erlaubt manuelles Starten über die Actions-Oberfläche
 
 jobs:
   test:
