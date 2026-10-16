@@ -36,9 +36,10 @@ ersten Nutzung nach und speichert den Token nicht. Siehe
 
 **Eigene DMs aus dem Datenpaket.** Der regelkonforme Weg für Direktnachrichten.
 Discord stellt ein Datenpaket bereit (Einstellungen → Daten & Privatsphäre →
-„Alle meine Daten anfordern“). Das Werkzeug liest die `package.zip` direkt, alte
-und neue Paketstruktur. Das Paket enthält nur die eigenen Nachrichten, nie die
-der Gegenseite.
+„Alle meine Daten anfordern“). Das Werkzeug liest die `package.zip` direkt oder
+den entpackten Ordner, alte und neue Paketstruktur, auch mit übersetzten
+Ordnernamen (`Nachrichten`, `Server` …). Das Paket enthält nur die eigenen
+Nachrichten, nie die der Gegenseite.
 
 ## Einmalig einrichten
 

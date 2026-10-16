@@ -57,10 +57,24 @@ class _Source:
             self.zip.close()
 
 
-# Ein Unterhaltungsordner: messages/<name>/ mit channel.json und/oder messages.json/.csv.
-# Name meist c<Kanal-ID> (neu) oder <Kanal-ID> (alt); andere Namen werden toleriert.
-_CHANNEL_FILE = re.compile(r"^(.*?messages/)([^/]+)/(channel\.json|messages\.json|messages\.csv)$", re.I)
-_ROOT = re.compile(r"^(.*?)messages/(?:index\.json|[^/]+/(?:channel\.json|messages\.json|messages\.csv))$")
+# Discord übersetzt die Ordnernamen des Pakets in die Kontosprache („Nachrichten“,
+# „Server“ …). Die Namen sind nur ein Hinweis; erkannt wird über die Struktur.
+MESSAGES_DIRS = {
+    "messages", "nachrichten", "mensajes", "messaggi", "berichten", "wiadomości", "wiadomosci",
+    "mensagens", "сообщения", "повідомлення", "meddelelser", "meddelanden", "meldinger", "viestit",
+    "zprávy", "üzenetek", "mesajlar", "mesaje", "μηνύματα", "メッセージ", "메시지", "消息", "訊息",
+}
+SERVERS_DIRS = {
+    "servers", "server", "servidores", "serveurs", "serwery", "servere", "sunucular", "сервери",
+    "серверы", "palvelimet", "szerverek", "サーバー", "서버", "服务器", "伺服器",
+}
+ACCOUNT_DIRS = {"account", "konto", "compte", "cuenta", "conta", "tili", "fiók", "hesap", "аккаунт",
+                "акаунт", "アカウント", "계정", "账户", "帳號"}
+DM_PREFIXES = ("Direct Message with ", "Direktnachricht mit ", "Direktnachrichten mit ")
+
+# Kanalordner im neuen Format: c<Kanal-ID>; im alten nur <Kanal-ID>
+_CHANNEL_DIR = re.compile(r"^c?\d{3,}$", re.I)
+_KNOWN_FILES = ("channel.json", "messages.json", "messages.csv")
 
 
 class DataPackage:
@@ -69,6 +83,8 @@ class DataPackage:
         if not self.path.exists():
             raise FileNotFoundError(f"Nicht gefunden: {self.path}")
         self.src = _Source(self.path)
+        self.msgdir = "messages"
+        self.prefix = ""
         self.root = self._find_root()
         self.account = self._read_account()
         self.author = self._account_author()
@@ -84,11 +100,37 @@ class DataPackage:
     # --------------------------------------------------------------- Struktur
 
     def _find_root(self) -> str:
-        for lower in self.src.lower:
-            m = _ROOT.match(lower)
-            if m:
-                return m.group(1)
-        raise ValueError(self._diagnose())
+        """Paketwurzel und Nachrichtenordner über die Struktur bestimmen.
+
+        Jede Datei <ordner>/<kanalordner>/<datei.json|csv> ist eine Stimme für <ordner>. Bekannte
+        (übersetzte) Ordnernamen, „c“-Kanalordner und die üblichen Dateinamen zählen; Ordner unter
+        Konto/Server (dort liegen ebenfalls Ordner mit IDs) zählen nicht. Wurde der Nachrichtenordner
+        selbst gewählt, ist er die Wurzel.
+        """
+        votes: dict[tuple[str, str], int] = {}
+        for name in self.src.names:
+            parts = name.split("/")
+            if len(parts) < 2 or not parts[-1].lower().endswith((".json", ".csv")):
+                continue
+            chdir, base = parts[-2], parts[-1].lower()
+            msgdir = parts[-3] if len(parts) >= 3 else ""
+            low = msgdir.lower()
+            if low not in MESSAGES_DIRS:
+                if not _CHANNEL_DIR.match(chdir):
+                    continue
+                if {p.lower() for p in parts[:-2]} & (SERVERS_DIRS | ACCOUNT_DIRS):
+                    continue
+            weight = ((100 if low in MESSAGES_DIRS else 0) + (10 if base in _KNOWN_FILES else 0)
+                      + (5 if chdir[:1].lower() == "c" and _CHANNEL_DIR.match(chdir) else 0))
+            if not weight:
+                continue  # nur Zahlenordner mit fremden Dateien: zu unsicher
+            key = ("/".join(parts[:-3]) + "/" if len(parts) > 3 else "", msgdir)
+            votes[key] = votes.get(key, 0) + weight
+        if not votes:
+            raise ValueError(self._diagnose())
+        self.root, self.msgdir = max(votes, key=lambda k: votes[k])
+        self.prefix = f"{self.root}{self.msgdir}/" if self.msgdir else self.root
+        return self.root
 
     def _diagnose(self) -> str:
         """Fehlermeldung, die sagt, was im gewählten Ordner/ZIP tatsächlich liegt."""
@@ -102,30 +144,43 @@ class DataPackage:
         zips = [n for n in names if n.lower().endswith(".zip")]
         seen = ", ".join(dirs[:12]) + (" …" if len(dirs) > 12 else "") if dirs else \
             ", ".join(n for n in names[:8])
-        msg = f"Kein Ordner „Messages“ mit Unterhaltungen gefunden. Im gewählten Pfad liegt: {seen}."
+        msg = f"Kein Ordner mit Unterhaltungen gefunden. Im gewählten Pfad liegt: {seen}."
+        lows = {d.lower().split("/")[-1] for d in dirs}
         if zips:
             msg += (f" Darin steckt noch eine ZIP-Datei ({zips[0].split('/')[-1]}): bitte diese direkt wählen "
                     "oder vorher entpacken.")
-        elif any(d.lower().split("/")[-1] in ("account", "servers", "activity", "activities") for d in dirs):
+        elif lows & MESSAGES_DIRS:
+            msg += " Der Nachrichtenordner ist da, aber leer oder unvollständig entpackt."
+        elif lows & (ACCOUNT_DIRS | SERVERS_DIRS):
             msg += (" Das sieht nach einem Discord-Datenpaket ohne Nachrichten aus. Beim Anfordern in Discord "
                     "(Einstellungen → Daten & Privatsphäre → Daten anfordern) muss „Nachrichten“ angehakt sein.")
         return msg
 
-    def _get(self, *relative: str) -> str | None:
-        for rel in relative:
-            name = self.src.find((self.root + rel).lower())
-            if name:
+    def _top_file(self, dirs: set[str], filename: str) -> str | None:
+        """<wurzel>/<ordner>/<datei>: bekannter Ordnername zuerst, sonst irgendein anderer Ordner."""
+        fallback = None
+        for name in self.src.names:
+            if not name.startswith(self.root):
+                continue
+            parts = name[len(self.root):].split("/")
+            if len(parts) != 2 or parts[1].lower() != filename or parts[0] == self.msgdir:
+                continue
+            if parts[0].lower() in dirs:
                 return name
-        return None
+            fallback = fallback or name
+        return fallback
 
-    def _read_account(self) -> dict:
-        name = self._get("account/user.json")
+    def _read_json_safe(self, name: str | None):
         if not name:
-            return {}
+            return None
         try:
             return self.src.read_json(name)
         except ValueError:
-            return {}
+            return None
+
+    def _read_account(self) -> dict:
+        data = self._read_json_safe(self._top_file(ACCOUNT_DIRS, "user.json"))
+        return data if isinstance(data, dict) else {}
 
     def _account_author(self) -> dict:
         acc = self.account
@@ -145,22 +200,15 @@ class DataPackage:
                                          or user.get("username") or uid)
 
     def _read_guild_names(self) -> dict[str, str]:
-        name = self._get("servers/index.json")
-        if not name:
-            return {}
-        try:
-            return {str(k): v for k, v in self.src.read_json(name).items()}
-        except (ValueError, AttributeError):
-            return {}
+        name = self._top_file(SERVERS_DIRS, "index.json")
+        if name and name.split("/")[-2].lower() not in SERVERS_DIRS:
+            return {}  # unbekannter Ordner: keine Servernamen raten
+        data = self._read_json_safe(name)
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
     def _read_index(self) -> dict[str, str]:
-        name = self._get("messages/index.json")
-        if not name:
-            return {}
-        try:
-            return {str(k): v for k, v in self.src.read_json(name).items() if v}
-        except (ValueError, AttributeError):
-            return {}
+        data = self._read_json_safe(self.src.find(f"{self.prefix}index.json".lower()))
+        return {str(k): v for k, v in data.items() if v} if isinstance(data, dict) else {}
 
     # ---------------------------------------------------------- Unterhaltungen
 
@@ -170,26 +218,23 @@ class DataPackage:
         return self._conversations
 
     def _scan(self) -> list[PackageConversation]:
-        folders: dict[str, str | None] = {}  # Ordner -> Pfad der channel.json (oder None)
+        prefix = self.prefix
+        files: dict[str, list[str]] = {}  # Kanalordner -> Dateien darin
         for name in self.src.names:
-            m = _CHANNEL_FILE.match(name)
-            if not m:
+            if not name.startswith(prefix):
                 continue
-            folder = name[: -len(m.group(3))]
-            if m.group(3).lower() == "channel.json":
-                folders[folder] = name
-            else:
-                folders.setdefault(folder, None)
+            parts = name[len(prefix):].split("/")
+            if len(parts) == 2 and parts[1].lower().endswith((".json", ".csv")):
+                files.setdefault(f"{prefix}{parts[0]}/", []).append(name)
+        self._layout: dict[str, tuple[str | None, tuple[str, str] | None]] = {}
         result = []
-        for folder, meta_name in folders.items():
-            meta: dict = {}
-            if meta_name:
-                try:
-                    meta = self.src.read_json(meta_name)
-                except ValueError:
-                    meta = {}
-            if not isinstance(meta, dict):
-                meta = {}
+        for folder, names in sorted(files.items()):
+            meta_name, msgs = self._classify(names)
+            if not msgs and not meta_name:
+                continue
+            self._layout[folder] = (meta_name, msgs)
+            meta = self._read_json_safe(meta_name)
+            meta = meta if isinstance(meta, dict) else {}
             dirname = folder.rstrip("/").rsplit("/", 1)[-1]
             digits = dirname[1:] if dirname[:1].lower() == "c" else dirname
             cid = digits if digits.isdigit() else str(meta.get("id") or dirname)
@@ -198,10 +243,42 @@ class DataPackage:
                                    c.info.name.lower()))
         return result
 
+    def _classify(self, names: list[str]) -> tuple[str | None, tuple[str, str] | None]:
+        """Kanalinfo und Nachrichtendatei eines Ordners finden; unbekannte Namen am Inhalt erkennen."""
+        meta: str | None = None
+        msgs: tuple[str, str] | None = None
+        rest = []
+        for n in names:
+            base = n.rsplit("/", 1)[-1].lower()
+            if base == _KNOWN_FILES[0]:
+                meta = n
+            elif base in _KNOWN_FILES[1:]:
+                msgs = (n, base.rsplit(".", 1)[1])
+            else:
+                rest.append(n)
+        for n in rest:
+            if meta and msgs:
+                break
+            if n.lower().endswith(".csv"):
+                msgs = msgs or (n, "csv")
+                continue
+            data = self._read_json_safe(n)
+            if isinstance(data, list) and not msgs:
+                msgs = (n, "json")
+            elif isinstance(data, dict):
+                if isinstance(data.get("messages"), list) and not msgs:
+                    msgs = (n, "json")
+                elif not meta and any(k in data for k in ("id", "type", "recipients", "guild")):
+                    meta = n
+        return meta, msgs
+
     def _conversation(self, cid: str, folder: str, meta: dict) -> PackageConversation:
         raw_type = meta.get("type", 0)
         ctype = raw_type if isinstance(raw_type, int) else PACKAGE_CHANNEL_TYPES.get(str(raw_type).upper(), 0)
         guild = meta.get("guild") or {}
+        if ctype == 0 and not guild and meta.get("recipients"):
+            # Typ unbekannt (z. B. übersetzt): Empfänger ohne Server heißt DM bzw. Gruppe
+            ctype = 1 if len(meta["recipients"]) <= 2 else 3
         guild_id = str(guild["id"]) if guild.get("id") else None
         guild_name = guild.get("name") or (self.guild_names.get(guild_id) if guild_id else None)
         index_name = self.index.get(cid)
@@ -209,7 +286,11 @@ class DataPackage:
             others = [str(r) for r in meta.get("recipients") or [] if str(r) != self.author["id"]]
             other = self.known_users.get(others[0]) if others else None
             if index_name:
-                name = index_name.replace("Direct Message with ", "DM mit ")
+                name = index_name
+                for prefix in DM_PREFIXES:
+                    if name.startswith(prefix):
+                        name = "DM mit " + name[len(prefix):]
+                        break
             elif other:
                 name = f"DM mit {other}"
             else:
@@ -227,10 +308,9 @@ class DataPackage:
         return PackageConversation(info=info, folder=folder, message_count=self._count(folder), group=group)
 
     def _messages_file(self, folder: str) -> tuple[str | None, str]:
-        for fname, kind in (("messages.json", "json"), ("messages.csv", "csv")):
-            name = self.src.find((folder + fname).lower())
-            if name:
-                return name, kind
+        layout = getattr(self, "_layout", {}).get(folder)
+        if layout and layout[1]:
+            return layout[1]
         return None, ""
 
     def _rows(self, folder: str) -> list[dict]:

@@ -234,9 +234,20 @@ def _filename_from_url(url: str) -> str:
     return unquote(path.rsplit("/", 1)[-1]) or "datei"
 
 
+_PACKAGE_KEYS = {
+    "id": ("nachrichten-id", "nachricht-id", "message id", "message_id"),
+    "timestamp": ("zeitstempel", "datum", "date", "zeit"),
+    "contents": ("content", "inhalt", "inhalte", "nachricht", "text"),
+    "attachments": ("anhänge", "anhaenge", "anhang", "attachment"),
+}
+
+
 def normalize_package_message(row: dict, author: dict) -> dict | None:
     """Zeile aus messages.json/messages.csv des Datenpakets (ID, Timestamp, Contents, Attachments)."""
     lowered = {str(k).strip().lower(): v for k, v in row.items()}
+    for key, aliases in _PACKAGE_KEYS.items():  # übersetzte Spaltennamen auf die englischen abbilden
+        if key not in lowered:
+            lowered[key] = next((lowered[a] for a in aliases if a in lowered), None)
     mid = lowered.get("id")
     if mid in (None, ""):
         return None

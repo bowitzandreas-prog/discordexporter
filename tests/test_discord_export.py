@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -268,6 +269,73 @@ class PackageTests(unittest.TestCase):
             convs = pkg.conversations()
             self.assertEqual([c.info.id for c in convs], ["777"])
             self.assertEqual(pkg.messages(convs[0])[0]["content"], "nur Nachrichten")
+
+    def _german_package(self, base: Path) -> None:
+        """Paket mit deutschen Ordnernamen, wie Discord es für deutschsprachige Konten liefert."""
+        (base / "Account" / "applications" / "4242").mkdir(parents=True)
+        (base / "Account" / "applications" / "4242" / "application.json").write_text('{"id": "4242"}', "utf-8")
+        (base / "Account" / "user.json").write_text(json.dumps({
+            "id": "1", "username": "andi", "relationships": [{"id": "2", "user": {"id": "2", "username": "misty"}}],
+        }), "utf-8")
+        for d in ("Aktivität/analytics", "Aktivitäten/Aktivitäten_1"):
+            (base / d).mkdir(parents=True)
+            (base / d / "events-1.json").write_text("{}", "utf-8")
+        (base / "Server" / "9000").mkdir(parents=True)
+        (base / "Server" / "9000" / "guild.json").write_text('{"id": "9000", "name": "Handelsserver"}', "utf-8")
+        (base / "Server" / "index.json").write_text('{"9000": "Handelsserver"}', "utf-8")
+        msgs = base / "Nachrichten"
+        (msgs / "c1000497408716853308").mkdir(parents=True)
+        (msgs / "c1000497408716853308" / "channel.json").write_text(
+            json.dumps({"id": "1000497408716853308", "type": "DM", "recipients": ["1", "2"]}), "utf-8")
+        (msgs / "c1000497408716853308" / "messages.json").write_text(json.dumps([
+            {"ID": int(sf(5)), "Timestamp": "2024-05-01 10:00:00", "Contents": "Beweis", "Attachments": ""},
+        ]), "utf-8")
+        (msgs / "c1031006348835557456").mkdir()
+        (msgs / "c1031006348835557456" / "kanal.json").write_text(
+            json.dumps({"id": "1031006348835557456", "type": 0, "name": "handel",
+                        "guild": {"id": "9000", "name": "Handelsserver"}}), "utf-8")
+        (msgs / "c1031006348835557456" / "nachrichten.json").write_text(json.dumps([
+            {"ID": int(sf(6)), "Zeitstempel": "2024-05-02 11:00:00", "Inhalt": "Angebot", "Anhänge": ""},
+        ]), "utf-8")
+        (msgs / "index.json").write_text(json.dumps({
+            "1000497408716853308": "Direktnachricht mit misty#0", "1031006348835557456": "handel in Handelsserver",
+        }), "utf-8")
+
+    def test_german_localized_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self._german_package(tmp / "package")
+            for path in (tmp / "package", tmp / "package" / "Nachrichten"):
+                pkg = DataPackage(path)
+                convs = pkg.conversations()
+                self.assertEqual([c.info.id for c in convs], ["1000497408716853308", "1031006348835557456"])
+                self.assertEqual(pkg.messages(convs[1])[0]["content"], "Angebot")
+                pkg.close()
+            pkg = DataPackage(tmp / "package")
+            convs = pkg.conversations()
+            self.assertEqual(convs[0].info.name, "DM mit misty#0")
+            self.assertEqual(convs[0].group, "Direktnachrichten")
+            self.assertEqual(convs[1].group, "Server: Handelsserver")
+            self.assertEqual(pkg.author["username"], "andi")
+            self.assertEqual(pkg.messages(convs[0])[0]["content"], "Beweis")
+            pkg.close()
+
+            zpath = tmp / "package.zip"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                for f in (tmp / "package").rglob("*"):
+                    if f.is_file():
+                        zf.write(f, f.relative_to(tmp / "package").as_posix())
+            pkg = DataPackage(zpath)
+            self.assertEqual(len(pkg.conversations()), 2)
+            pkg.close()
+
+    def test_package_without_messages_ignores_id_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._german_package(Path(tmp))
+            shutil.rmtree(Path(tmp) / "Nachrichten")
+            with self.assertRaises(ValueError) as ctx:
+                DataPackage(tmp)
+            self.assertIn("„Nachrichten“ angehakt", str(ctx.exception))
 
     def test_not_a_package(self):
         with tempfile.TemporaryDirectory() as tmp:
