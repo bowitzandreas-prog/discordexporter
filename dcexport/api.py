@@ -23,6 +23,7 @@ from .util import datetime_to_snowflake
 API_BASE = "https://discord.com/api/v10"
 USER_AGENT = f"DiscordBot (https://github.com/bowitzandreas-prog/discordexporter, {__version__})"
 USER_MODE_AGENT = f"DiscordExport/{__version__} (+https://github.com/bowitzandreas-prog/discordexporter)"
+RESET_MARGIN = 0.05  # Sekunden Puffer nach dem Bucket-Reset
 
 ERROR_HINTS = {
     401: "Token ungültig. Erwartet wird ein Bot-Token aus dem Developer Portal (Bot → Reset Token).",
@@ -158,12 +159,14 @@ class DiscordClient:
                                          f"Firewall prüfen.", path=path) from err
 
     def _note_bucket(self, route: str, headers) -> None:
+        # Kleiner Puffer: unter Windows tickt time.monotonic() nur alle ~16 ms, ohne ihn kommt die
+        # nächste Anfrage mitunter knapp vor dem Reset an und kassiert ein 429.
         remaining = headers.get("X-RateLimit-Remaining")
         reset_after = headers.get("X-RateLimit-Reset-After")
         if remaining is not None and reset_after is not None:
             try:
                 if int(float(remaining)) <= 0:
-                    self._bucket_wait[route] = time.monotonic() + float(reset_after)
+                    self._bucket_wait[route] = time.monotonic() + float(reset_after) + RESET_MARGIN
             except ValueError:
                 pass
 
