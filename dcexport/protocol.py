@@ -100,7 +100,8 @@ def write_protocol(out_dir: Path, *, started: datetime, summary, options, source
         f"Zeitraum:      {zeitraum}",
         f"Formate:       {', '.join(sorted(options.formats))}",
         f"Medien:        {'heruntergeladen' if options.download_media else 'nicht heruntergeladen'}"
-        + (f" ({summary.media_ok} geladen, {summary.media_failed} fehlgeschlagen)" if options.download_media else ""),
+        + (f" ({getattr(summary, 'media_total', summary.media_ok)} gesichert, davon {summary.media_ok} neu geladen,"
+           f" {summary.media_failed} fehlgeschlagen)" if options.download_media else ""),
         f"Status:        {status}",
         f"Ergebnis:      {summary.result_text()}",
         "",

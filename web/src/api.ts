@@ -33,6 +33,7 @@ export interface ExportResult {
   messages: number;
   files: number;
   media_ok: number;
+  media_total: number;
   media_failed: number;
   skipped: string[];
   errors: string[];

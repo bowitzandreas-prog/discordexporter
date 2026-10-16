@@ -189,6 +189,11 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(summary.channels, 2)
             self.assertEqual(summary.messages, 3)
             self.assertEqual(summary.media_ok, 2)  # Anhang + Standard-Avatar
+            self.assertEqual(summary.media_total, 2)
+            again = PackageExporter(pkg, log=lambda m: None).export(convs, opts)
+            self.assertEqual(again.media_ok, 0)      # schon vorhanden, nichts neu geladen
+            self.assertEqual(again.media_total, 2)   # trotzdem gesichert und in den Prüfsummen
+            self.assertIn("2 Medien", again.text())
             out = tmp / "out" / "Datenpaket andi"
             html = (out / "DM mit misty#0 [111].html").read_text("utf-8")
             self.assertIn("@Misty", html)
@@ -234,6 +239,35 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(summary.messages, 2)
             txt = (tmp / "out" / "Datenpaket andi" / "Sammler-Runde [555].txt").read_text("utf-8")
             self.assertIn("Zeile 2", txt)
+
+    def test_package_without_messages_explains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for d in ("Account", "Servers", "Activity"):
+                (Path(tmp) / d).mkdir()
+                (Path(tmp) / d / "x.json").write_text("{}", "utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                DataPackage(tmp)
+            self.assertIn("Account", str(ctx.exception))
+            self.assertIn("„Nachrichten“ angehakt", str(ctx.exception))
+
+    def test_folder_with_unpacked_zip_explains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "package.zip").write_bytes(b"PK")
+            with self.assertRaises(ValueError) as ctx:
+                DataPackage(tmp)
+            self.assertIn("ZIP", str(ctx.exception))
+
+    def test_nested_folder_and_missing_channel_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ch = Path(tmp) / "package" / "Messages" / "c777"
+            ch.mkdir(parents=True)
+            (ch / "messages.json").write_text(json.dumps([
+                {"ID": int(sf(3)), "Timestamp": "2024-03-01 09:03:00", "Contents": "nur Nachrichten", "Attachments": ""}
+            ]), "utf-8")
+            pkg = DataPackage(tmp)
+            convs = pkg.conversations()
+            self.assertEqual([c.info.id for c in convs], ["777"])
+            self.assertEqual(pkg.messages(convs[0])[0]["content"], "nur Nachrichten")
 
     def test_not_a_package(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -369,6 +403,8 @@ class ApiTests(unittest.TestCase):
             self.assertTrue(data["messages"][0]["link"].startswith("https://discord.com/channels/@me/6001/"))
             proto = Path(summary.protocol_files[0]).read_text("utf-8")
             self.assertIn("Benutzer-Token), Konto „andi“ (ID 4001)", proto)
+            self.assertIn(". DM mit misty (@misty) (Kanal-ID 6001)", proto)
+            self.assertNotIn("None", proto)
             self.assertTrue((Path(tmp) / "CollectnTrade Community" / "Allgemein - willkommen [2001].html").exists())
         # Mitglieder-Endpunkt nach dem ersten 403 nicht mehr gefragt, Threads-Endpunkt einmal
         self.assertLessEqual(self.mock.user_forbidden, 2)

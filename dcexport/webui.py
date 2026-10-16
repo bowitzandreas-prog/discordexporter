@@ -355,7 +355,7 @@ class Backend:
             self.s.allowed_open |= allowed
             self.s.result = {
                 "text": summary.text(), "channels": summary.channels, "messages": summary.messages,
-                "files": len(summary.files), "media_ok": summary.media_ok, "media_failed": summary.media_failed,
+                "files": len(summary.files), "media_ok": summary.media_ok, "media_total": summary.media_total, "media_failed": summary.media_failed,
                 "skipped": summary.skipped_items, "errors": summary.errors, "cancelled": summary.cancelled,
                 "out_dir": options.out_dir, "protocol": summary.protocol_files, "html": html[:50],
                 "sums_hash": sums_hash,

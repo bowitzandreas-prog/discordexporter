@@ -37,8 +37,9 @@ class Summary:
     skipped: int = 0
     messages: int = 0
     files: list[str] = field(default_factory=list)
-    media_ok: int = 0
+    media_ok: int = 0       # in diesem Lauf neu geladen
     media_failed: int = 0
+    media_total: int = 0    # alle lokal gesicherten Medien dieses Laufs (auch wiederverwendete)
     errors: list[str] = field(default_factory=list)
     cancelled: bool = False
     channel_log: list[dict] = field(default_factory=list)
@@ -53,8 +54,8 @@ class Summary:
 
     def text(self) -> str:
         parts = [self.result_text()]
-        if self.media_ok or self.media_failed:
-            parts.append(f"{self.media_ok} Medien" + (f" ({self.media_failed} fehlgeschlagen)" if self.media_failed else ""))
+        if self.media_total or self.media_failed:
+            parts.append(f"{self.media_total} Medien" + (f" ({self.media_failed} fehlgeschlagen)" if self.media_failed else ""))
         if self.skipped:
             parts.append(f"{self.skipped} übersprungen")
         return ("Abgebrochen nach " if self.cancelled else "Fertig: ") + ", ".join(parts) + "."
@@ -302,7 +303,7 @@ class ApiExporter:
             for index, (ch, from_expansion) in enumerate(targets):
                 if cancel.is_set():
                     raise Cancelled()
-                label = f"{ch.guild_name} / {ch.title}"
+                label = f"{ch.guild_name} / {ch.title}" if ch.guild_name else ch.title
                 progress(index, len(targets), 0.0, label)
                 self.log(f"[{index + 1}/{len(targets)}] {label}")
                 try:
@@ -332,6 +333,7 @@ class ApiExporter:
         for media in medias.values():
             summary.media_ok += media.downloaded
             summary.media_failed += media.failed
+            summary.media_total += len(media.files())
         _finish_protocol(self.log, out_root, exported_at, summary, options, [self.source_line],
                          [p for m in medias.values() for p in m.files()])
         return summary
@@ -485,6 +487,7 @@ class PackageExporter:
             self.log(f"Fehler: {err}\n{traceback.format_exc()}")
         if media:
             summary.media_ok, summary.media_failed = media.downloaded, media.failed
+            summary.media_total = len(media.files())
         pkg_path = self.package.path
         source = [f"Discord-Datenpaket, Konto „{self.package.author['username']}“ (ID {self.package.author['id']})",
                   f"Paket: {pkg_path}"]

@@ -57,7 +57,10 @@ class _Source:
             self.zip.close()
 
 
-_CHANNEL_DIR = re.compile(r"^(.*?messages/)(c?)(\d+)/channel\.json$", re.I)
+# Ein Unterhaltungsordner: messages/<name>/ mit channel.json und/oder messages.json/.csv.
+# Name meist c<Kanal-ID> (neu) oder <Kanal-ID> (alt); andere Namen werden toleriert.
+_CHANNEL_FILE = re.compile(r"^(.*?messages/)([^/]+)/(channel\.json|messages\.json|messages\.csv)$", re.I)
+_ROOT = re.compile(r"^(.*?)messages/(?:index\.json|[^/]+/(?:channel\.json|messages\.json|messages\.csv))$")
 
 
 class DataPackage:
@@ -82,10 +85,31 @@ class DataPackage:
 
     def _find_root(self) -> str:
         for lower in self.src.lower:
-            m = re.match(r"^(.*?)messages/(?:index\.json|c?\d+/channel\.json)$", lower)
+            m = _ROOT.match(lower)
             if m:
                 return m.group(1)
-        raise ValueError("Kein Discord-Datenpaket: Ordner 'messages' mit channel.json fehlt.")
+        raise ValueError(self._diagnose())
+
+    def _diagnose(self) -> str:
+        """Fehlermeldung, die sagt, was im gewählten Ordner/ZIP tatsächlich liegt."""
+        names = self.src.names
+        if not names:
+            return "Der gewählte Ordner ist leer. Bitte den entpackten Paketordner oder die package.zip wählen."
+        dirs = sorted({n.split("/")[0] for n in names if "/" in n}, key=str.lower)
+        if len(dirs) == 1:  # alles in einem Unterordner: eine Ebene tiefer zeigen
+            inner = sorted({"/".join(n.split("/")[:2]) for n in names if n.count("/") >= 2}, key=str.lower)
+            dirs = inner or dirs
+        zips = [n for n in names if n.lower().endswith(".zip")]
+        seen = ", ".join(dirs[:12]) + (" …" if len(dirs) > 12 else "") if dirs else \
+            ", ".join(n for n in names[:8])
+        msg = f"Kein Ordner „Messages“ mit Unterhaltungen gefunden. Im gewählten Pfad liegt: {seen}."
+        if zips:
+            msg += (f" Darin steckt noch eine ZIP-Datei ({zips[0].split('/')[-1]}): bitte diese direkt wählen "
+                    "oder vorher entpacken.")
+        elif any(d.lower().split("/")[-1] in ("account", "servers", "activity", "activities") for d in dirs):
+            msg += (" Das sieht nach einem Discord-Datenpaket ohne Nachrichten aus. Beim Anfordern in Discord "
+                    "(Einstellungen → Daten & Privatsphäre → Daten anfordern) muss „Nachrichten“ angehakt sein.")
+        return msg
 
     def _get(self, *relative: str) -> str | None:
         for rel in relative:
@@ -146,17 +170,29 @@ class DataPackage:
         return self._conversations
 
     def _scan(self) -> list[PackageConversation]:
-        result = []
+        folders: dict[str, str | None] = {}  # Ordner -> Pfad der channel.json (oder None)
         for name in self.src.names:
-            m = _CHANNEL_DIR.match(name)
+            m = _CHANNEL_FILE.match(name)
             if not m:
                 continue
-            folder = name[: -len("channel.json")]
-            cid = m.group(3)
-            try:
-                meta = self.src.read_json(name)
-            except ValueError:
+            folder = name[: -len(m.group(3))]
+            if m.group(3).lower() == "channel.json":
+                folders[folder] = name
+            else:
+                folders.setdefault(folder, None)
+        result = []
+        for folder, meta_name in folders.items():
+            meta: dict = {}
+            if meta_name:
+                try:
+                    meta = self.src.read_json(meta_name)
+                except ValueError:
+                    meta = {}
+            if not isinstance(meta, dict):
                 meta = {}
+            dirname = folder.rstrip("/").rsplit("/", 1)[-1]
+            digits = dirname[1:] if dirname[:1].lower() == "c" else dirname
+            cid = digits if digits.isdigit() else str(meta.get("id") or dirname)
             result.append(self._conversation(cid, folder, meta))
         result.sort(key=lambda c: (c.group != "Direktnachrichten", c.group != "Gruppen", c.group.lower(),
                                    c.info.name.lower()))

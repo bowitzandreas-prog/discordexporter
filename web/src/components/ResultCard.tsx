@@ -44,7 +44,7 @@ export function ResultCard({ result }: { result: ExportResult }) {
         <Stat label="Kanäle" value={result.channels} />
         <Stat label="Nachrichten" value={result.messages} />
         <Stat label="Dateien" value={result.files} />
-        <Stat label="Medien" value={result.media_ok} />
+        <Stat label="Medien" value={result.media_total} />
       </div>
 
       {result.sums_hash && (

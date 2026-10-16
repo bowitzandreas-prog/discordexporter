@@ -257,5 +257,22 @@ npm run dev        # Entwicklungsserver mit sofortiger Vorschau
 ```
 
 Die Animationen und Effekte stammen von [React Bits](https://reactbits.dev)
-(MIT mit Commons-Clause-Zusatz, siehe `web/src/bits/LICENSE-react-bits.md`).
+(MIT mit Commons-Clause-Zusatz, siehe `licenses/react-bits-MIT-Commons-Clause.md`).
 Die Komponenten sind Teil der Anwendung, werden also nicht einzeln weiterverkauft.
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE). Mitgelieferte Fremdbestandteile (React, Motion,
+React Bits, IBM-Plex-Schriften) stehen unter ihren eigenen Lizenzen, siehe
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Entstehung
+
+Der Code ist mit KI-Unterstützung entstanden: Geschrieben hat ihn Claude
+(Anthropic) über Claude Code, nach Vorgaben und Rückmeldungen von Andreas Bowitz.
+Commits mit KI-Beteiligung tragen die Zeile `Co-Authored-By: Claude`. Geprüft wird
+der Code durch automatische Tests gegen eine nachgebaute Discord-API, bei jedem
+Push unter Windows und Linux.
+
+Fehler und Wünsche bitte als
+[Issue](https://github.com/bowitzandreas-prog/discordexporter/issues) melden.
