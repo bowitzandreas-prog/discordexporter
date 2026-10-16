@@ -82,16 +82,19 @@ export function ExportPanel({
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="min-w-0">
-            <label className="eyebrow mb-2 block">Zeitraum (leer = alles)</label>
-            <div className="flex items-center gap-2">
-              <input type="date" className="field min-w-0 flex-1 text-[13px]" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="von" />
-              <span className="shrink-0 text-faint">bis</span>
-              <input type="date" className="field min-w-0 flex-1 text-[13px]" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="bis" />
-            </div>
+        {/* Zeitraum über die volle Breite: „TT.MM.JJJJ“ samt Kalendersymbol braucht Platz */}
+        <div className="min-w-0">
+          <label className="eyebrow mb-2 block">Zeitraum (leer = alles)</label>
+          <div className="flex items-center gap-2">
+            <input type="date" className="field min-w-0 flex-1 text-[13px]" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="von" />
+            <span className="shrink-0 text-faint">bis</span>
+            <input type="date" className="field min-w-0 flex-1 text-[13px]" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="bis" />
           </div>
-          <div>
+        </div>
+
+        {/* Trennzeichen nur zeigen, wenn CSV gewählt ist */}
+        {formats.includes('csv') && (
+          <div className="sm:max-w-[50%]">
             <label className="eyebrow mb-2 block">CSV-Trennzeichen</label>
             <div className="relative">
               <select className="field appearance-none pr-9 text-[13px]" value={delim} onChange={(e) => setDelim(e.target.value)}>
@@ -100,7 +103,7 @@ export function ExportPanel({
               <Icon name="chevron" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 rotate-90 text-faint" />
             </div>
           </div>
-        </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Switch checked={media} onChange={setMedia} label="Medien herunterladen"

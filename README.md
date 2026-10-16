@@ -6,6 +6,8 @@ Python (keine Zusatzpakete) und schickt nichts an Dritte; es spricht nur mit
 `discord.com` und dem Discord-CDN. Die klassische Fenster-Oberfläche (Tkinter)
 gibt es weiter über `py -3 discord_export.py tk`.
 
+![Oberfläche: Quelle wählen, Kanäle auswählen, exportieren – mit Prüfsumme und Protokoll (Demodaten)](docs/screenshot.png)
+
 Ausgabeformate, frei kombinierbar:
 
 | Format | Datei | Wofür |
